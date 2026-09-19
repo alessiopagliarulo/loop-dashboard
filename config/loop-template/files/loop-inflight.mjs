@@ -34,8 +34,8 @@
  *       the same calibrated 0.828 threshold — see docs/ml-dedup.md in the dashboard
  *       repo), and marks a covered one with the `covered` label plus a comment that
  *       links to what covers it. It never closes, never re-labels anything else.
- *       Needs LOOP_EMBED_DIR pointing at a folder where @huggingface/transformers
- *       is installed; the workflows install it on demand.
+ *       Needs LOOP_EMBED_DIR, a folder for @huggingface/transformers and the model
+ *       weights; installed there on demand, and the workflows cache that folder.
  *
  * NOTHING HERE MAY FAIL A RUN. Every command exits 0 and says what it could not do
  * as a `::warning::`. A missing digest makes the agents slightly blinder; a red
@@ -546,8 +546,10 @@ export function coverComment(matches) {
 /* ------------------------------------------------------------------ */
 
 /**
- * The encoder, installed on demand into LOOP_EMBED_DIR (under RUNNER_TEMP) each run that
- * needs it; nothing is cached between runs, since a fresh install takes seconds.
+ * The encoder, installed on demand into LOOP_EMBED_DIR (under RUNNER_TEMP), with the
+ * model weights downloaded into LOOP_EMBED_DIR/models. The Scout, Builder and Redraft
+ * workflows cache that whole folder (actions/cache, keyed on EMBED_LIB_VERSION and
+ * EMBED_MODEL), so a warm run skips both; a cold one installs and downloads as here.
  */
 async function loadEncoder() {
   const dir = process.env.LOOP_EMBED_DIR;
@@ -568,6 +570,9 @@ async function loadEncoder() {
   const mod = await import(pathToFileURL(resolved).href);
   const pipeline = mod.pipeline ?? mod.default?.pipeline;
   if (typeof pipeline !== "function") throw new Error("@huggingface/transformers has no pipeline export");
+  // Weights land inside LOOP_EMBED_DIR, the folder the workflows cache, not in node_modules.
+  const env = mod.env ?? mod.default?.env;
+  if (env) env.cacheDir = join(dir, "models");
   // fp32, mean pooling, normalised: exactly what every number in dedup-eval.json used.
   const extractor = await pipeline("feature-extraction", EMBED_MODEL, { dtype: "fp32" });
   return async (texts) => {

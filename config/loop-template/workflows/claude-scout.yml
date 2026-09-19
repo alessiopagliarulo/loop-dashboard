@@ -709,6 +709,35 @@ jobs:
           claude_args: *scout_claude_args
           prompt: *scout_prompt
 
+      # The duplicate detector's library and MiniLM weights live in $RUNNER_TEMP/loop-embed
+      # (the script points the model cache inside it). Cache that folder between runs,
+      # keyed on the pinned library version and model read from the script, so an hourly
+      # run does not re-install and re-download them. A miss or a cache-service error only
+      # means the check installs them fresh, as before; neither step can fail the run.
+      - name: Key the duplicate detector cache
+        id: embedkey
+        if: success() && steps.gate.outputs.go == 'true'
+        continue-on-error: true
+        run: |
+          lib=""; model=""
+          if [ -f scripts/loop-inflight.mjs ]; then
+            lib=$(sed -n 's/^export const EMBED_LIB_VERSION = "\(.*\)";$/\1/p' scripts/loop-inflight.mjs || true)
+            model=$(sed -n 's/^export const EMBED_MODEL = "\(.*\)";$/\1/p' scripts/loop-inflight.mjs || true)
+          fi
+          if [ -n "$lib" ] && [ -n "$model" ]; then
+            echo "key=loop-embed-$RUNNER_OS-transformers-$lib-$(echo "$model" | tr '/' '_')" >> "$GITHUB_OUTPUT"
+          else
+            echo "Could not read the pinned embedding library and model — the check installs them fresh."
+          fi
+
+      - name: Restore the duplicate detector cache
+        if: success() && steps.gate.outputs.go == 'true' && steps.embedkey.outputs.key != ''
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/loop-embed
+          key: ${{ steps.embedkey.outputs.key }}
+
       # ── Backstop: flag anything filed that existing work already covers ──────────
       # The prompt tells the Scout to drop covered ideas; this checks that it did, with
       # the dashboard's own duplicate detector (same model, same text recipe, same

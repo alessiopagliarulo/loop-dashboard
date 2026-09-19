@@ -378,7 +378,7 @@ type Step = {
   id?: string;
   uses?: string;
   env?: Record<string, string>;
-  with?: { prompt?: string };
+  with?: { prompt?: string; path?: string; key?: string };
 };
 type Workflow = { jobs: Record<string, { steps: Step[] }> };
 
@@ -480,6 +480,42 @@ describe("the loop template wiring", () => {
         .filter((c) => c[0] === "check");
       expect(checks.length, file).toBeGreaterThan(0);
       for (const c of checks) expect(c[c.indexOf("--in") + 1], file).toMatch(/inflight\.json$/);
+    }
+  });
+
+  it("the Scout, Redraft and Builder cache the duplicate detector, keyed on the pinned library and model", () => {
+    const byFile = Object.fromEntries(templateWorkflows().map((w) => [w.file, w.doc]));
+    const expected = `loop-embed-Linux-transformers-${inflight.EMBED_LIB_VERSION}-${inflight.EMBED_MODEL.replace("/", "_")}`;
+    for (const file of ["claude-scout.yml", "claude-redraft.yml", "claude-builder.yml"]) {
+      const steps = Object.values(byFile[file].jobs).find((j) => j.steps.some((s) => s.id === "embedkey"))?.steps;
+      expect(steps, file).toBeTruthy();
+      const keyAt = steps!.findIndex((s) => s.id === "embedkey");
+      const cacheAt = steps!.findIndex((s) => String(s.uses ?? "").startsWith("actions/cache@"));
+      const checkAt = steps!.findIndex((s) => (s.run ?? "").includes("loop-inflight.mjs check"));
+      expect(keyAt, file).toBeGreaterThan(-1);
+      expect(cacheAt, file).toBeGreaterThan(keyAt);
+      expect(checkAt, file).toBeGreaterThan(cacheAt);
+      const cache = steps![cacheAt];
+      expect(cache.with?.path, file).toBe("${{ runner.temp }}/loop-embed");
+      expect(cache.with?.key, file).toBe("${{ steps.embedkey.outputs.key }}");
+      expect(cache.if, file).toContain("steps.embedkey.outputs.key != ''");
+      expect(cache["continue-on-error"], file).toBe(true);
+      expect(steps![keyAt]["continue-on-error"], file).toBe(true);
+      expect(steps![checkAt].run, file).toContain('LOOP_EMBED_DIR="$RUNNER_TEMP/loop-embed"');
+
+      // The key step reads the real script's pins; a changed version or model is a new key.
+      const dir = mkdtempSync(join(tmpdir(), "loop-embedkey-"));
+      mkdirSync(join(dir, "scripts"));
+      writeFileSync(join(dir, "scripts", "loop-inflight.mjs"), readFileSync(SCRIPT, "utf8"));
+      const out = join(dir, "github-output");
+      writeFileSync(out, "");
+      const res = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", steps![keyAt].run!], {
+        cwd: dir,
+        encoding: "utf8",
+        env: { PATH: process.env.PATH, RUNNER_OS: "Linux", GITHUB_OUTPUT: out } as unknown as NodeJS.ProcessEnv,
+      });
+      expect(res.status, file).toBe(0);
+      expect(readFileSync(out, "utf8"), file).toBe(`key=${expected}\n`);
     }
   });
 
