@@ -70,7 +70,9 @@ clears both.
 ## 3. Demo evidence — "prove the PR works"
 
 **What the dashboard does:** nothing to trigger the normal path — it fires automatically on
-every agent PR (`pull_request` opened/synchronize for `claude/**` branches). To re-capture,
+every loop PR (`pull_request` opened/synchronize on a `claude/` branch in this repo, opened
+by the loop's own identity; the owner's own PRs, even from a `claude/` branch, are skipped, as
+they are for the Auditor). To capture or re-capture any PR,
 the dashboard runs `workflow_dispatch` on `claude-demo.yml` with input `pr_number`.
 
 **What happens:** `.github/workflows/claude-demo.yml` checks out the PR branch, builds and

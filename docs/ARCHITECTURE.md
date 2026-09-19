@@ -158,8 +158,9 @@ agent at all.
   it looks."* · *"If they do not pass after honest effort, do NOT open a PR."*
 
 #### Auditor — `claude-audit.yml`
-- **Trigger:** `pull_request: [opened, synchronize, reopened]` — **every** PR, not just
-  `claude/` ones — plus `workflow_dispatch` with a required `pr_number`. Cancel-in-progress.
+- **Trigger:** `pull_request: [opened, synchronize, reopened]`, with a job `if:` that runs
+  it on **loop PRs only** (same gate as Demo, below), plus `workflow_dispatch` with a required
+  `pr_number`, which runs on any PR. Cancel-in-progress.
 - **Permissions:** `contents: read`, `pull-requests: write`, `issues: write`, and
   `allowed_bots: "claude"` (without which the action's bot-loop guard refuses to review any
   agent PR at all).
@@ -179,8 +180,12 @@ agent at all.
   agent's `canDispatch` matches its YAML.
 
 #### Demo — `claude-demo.yml`
-- **Trigger:** `pull_request: [opened, synchronize]` gated to head refs starting `claude/`,
-  plus `workflow_dispatch` with `pr_number`.
+- **Trigger:** `pull_request: [opened, synchronize]` with a job `if:` that runs it on
+  **loop PRs only**: head ref starting `claude/`, head repo is this repo, and the PR author
+  matches `LOOP_AUTHOR_PATTERNS` in `loop-inflight.mjs` (the in-flight detector's definition
+  of the loop's identity). The owner's own PRs, even from a `claude/` branch, show a skipped
+  run. Plus `workflow_dispatch` with `pr_number`, which runs on any PR. The gate is pinned by
+  `tests/lib/loop-pr-agents.test.ts`.
 - **Produces:** files under `$EVIDENCE_DIR` — `NN-<name>.png`, `video/NN-<name>.webm`,
   `NN-tests.txt` — and **`manifest.json`**:
   `{pr: int, captured_at: ISO8601, items: [{file, type: screenshot|video|log|audio|other, caption}]}`.

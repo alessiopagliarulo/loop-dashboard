@@ -34,10 +34,23 @@ concurrency:
 
 jobs:
   demo:
-    # Only bother for agent PRs (the ones the dashboard is built around).
+    # LOOP PRs ONLY. The owner also pushes branches and opens PRs by hand (and their own
+    # Claude Code sessions can name a branch `claude/...`); those get the plain CI checks and
+    # no agent, because every agent run spends the owner's Claude subscription. A loop PR is
+    # a `claude/` branch in this repo, opened by the loop's own identity - the same author
+    # test scripts/loop-inflight.mjs uses (LOOP_AUTHOR_PATTERNS), kept identical by
+    # the dashboard's tests/lib/loop-pr-agents.test.ts. GitHub has no head-branch filter on the
+    # `pull_request` trigger (`branches:` filters the BASE branch), so this `if:` is the
+    # filter, and anything else shows as a skipped run, not a failed one. A manual
+    # `workflow_dispatch` is the owner asking, so it always runs.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      startsWith(github.event.pull_request.head.ref, 'claude/')
+      (startsWith(github.event.pull_request.head.ref, 'claude/') &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (contains(github.event.pull_request.user.login, 'claude') ||
+      contains(github.event.pull_request.user.login, 'github-actions') ||
+      contains(github.event.pull_request.user.login, '[bot]') ||
+      contains(github.event.pull_request.user.login, 'anthropic')))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:

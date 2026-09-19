@@ -39,8 +39,8 @@ const LOOP_DESCRIPTION = `The workflows form an autonomous improvement loop on a
 - claude-scout.yml (Scout): hourly; researches and files 'proposal' issues. Never writes code.
 - claude-redraft.yml (Redraft): rewrites a proposal when the owner adds the 'redraft' label with feedback.
 - claude-builder.yml (Builder): picks the best approved/proposal issue and opens ONE pull request from a claude/ branch.
-- claude-audit.yml (Auditor): on every PR; five adversarial reviewers post a SHIP / FIX FIRST / DO NOT MERGE verdict.
-- claude-demo.yml (Demo): captures screenshot/video evidence on claude/ PRs and posts it as a comment.
+- claude-audit.yml (Auditor): on loop PRs only; five adversarial reviewers post a SHIP / FIX FIRST / DO NOT MERGE verdict.
+- claude-demo.yml (Demo): captures screenshot/video evidence on loop PRs and posts it as a comment.
 - claude-retro.yml (Retro): weekly; proposes edits to LEARNINGS.md and the other agents' prompts.
 - loop-metrics.yml (Metrics): plain daily reporting job, no AI.
 - claude-mention.yml (@mention): '@claude' comments wake an agent — the owner's phone remote control.

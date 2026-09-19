@@ -35,7 +35,7 @@ export const TARGET_AGENTS: { value: string; label: string; blurb: string }[] = 
   { value: "all", label: "All agents", blurb: "Give every agent this tool." },
   { value: "scout", label: "Scout", blurb: "Finds work and files proposals." },
   { value: "builder", label: "Builder", blurb: "Writes the code and opens PRs." },
-  { value: "audit", label: "Auditor", blurb: "Reviews every PR and gives a verdict." },
+  { value: "audit", label: "Auditor", blurb: "Reviews loop PRs and gives a verdict." },
   { value: "retro", label: "Retro", blurb: "Reviews how the loop is doing." },
   { value: "mention", label: "Mention", blurb: "Replies when you write @claude." },
   { value: "demo", label: "Demo", blurb: "Captures screenshots / video evidence." },
