@@ -290,6 +290,9 @@ jobs:
                  then one bullet per covering item in the form `- [what it is](full https URL)`;
                - skip steps 2 and 3, and go straight to step 4 (the label flip still has to
                  happen, or the idea drops out of his queue). He will decline it in one tap.
+               One exception: if the issue's thread already has a `<!-- loop:covered -->`
+               comment but no longer carries the `covered` label, the owner looked at that
+               flag and cleared it. He wants it kept — do not flag it again; redraft it normally.
                If only PART of it is covered, rewrite it down to the part that is not, and
                say in your summary comment what you cut and which link covers it.
                Either way, never rewrite it INTO something that list already covers.

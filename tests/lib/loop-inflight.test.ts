@@ -17,7 +17,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -221,6 +221,32 @@ describe("collect", () => {
     expect(data.defaultBranch).toBe("main");
     expect(data.unavailable.length).toBeGreaterThan(5);
   });
+
+  it("an owner's own claude/ branch and PR are human work, whatever the branch is called", () => {
+    const { gh } = fakeGh({
+      "--state open --limit 200 --json number,title,url,isDraft": () => [
+        { number: 40, title: "Map page", url: "https://github.com/acme/shop/pull/40", isDraft: true, headRefName: "claude/map-page", author: { login: "owner" }, updatedAt: RECENT, body: "Closes #7" },
+      ],
+      "api graphql": () => [
+        { name: "claude/csv-export", target: { committedDate: RECENT, messageHeadline: "wip: csv export, closes #11", author: { name: "Owner", email: "o@x", user: { login: "owner" } } } },
+      ],
+    });
+    const data = inflight.collect({ repo: "acme/shop", now: NOW, gh });
+    expect(data.openPrs.map((p: { number: number; loop: boolean }) => [p.number, p.loop])).toEqual([[40, false]]);
+    expect(data.branches.map((b: { branch: string; loop: boolean }) => [b.branch, b.loop])).toEqual([["claude/csv-export", false]]);
+
+    const idea = (n: number) => ({ kind: "idea", number: n, title: "t", body: "", url: `https://github.com/acme/shop/issues/${n}` });
+    expect(inflight.coversFor(idea(7), data, "build", () => undefined).map((c: { item: { url: string } }) => c.item.url)).toEqual([
+      "https://github.com/acme/shop/pull/40",
+    ]);
+    expect(inflight.coversFor(idea(11), data, "build", () => undefined).map((c: { item: { branch: string } }) => c.item.branch)).toEqual([
+      "claude/csv-export",
+    ]);
+
+    const digest = inflight.renderDigest(data);
+    expect(digest).not.toContain("(loop)");
+    expect(digest).toContain("claude/csv-export — last push 2026-09-18 by owner (HUMAN)");
+  });
 });
 
 describe("renderDigest", () => {
@@ -344,7 +370,16 @@ describe("the covered comment round-trips into the dashboard", () => {
 /* 4. The template's workflows, and the first run                      */
 /* ------------------------------------------------------------------ */
 
-type Step = { name?: string; run?: string; if?: string; "continue-on-error"?: boolean; id?: string };
+type Step = {
+  name?: string;
+  run?: string;
+  if?: string;
+  "continue-on-error"?: boolean;
+  id?: string;
+  uses?: string;
+  env?: Record<string, string>;
+  with?: { prompt?: string };
+};
 type Workflow = { jobs: Record<string, { steps: Step[] }> };
 
 function templateWorkflows(): Array<{ file: string; text: string; doc: Workflow }> {
@@ -354,6 +389,61 @@ function templateWorkflows(): Array<{ file: string; text: string; doc: Workflow 
       const text = readFileSync(join(WORKFLOWS_DIR, file), "utf8");
       return { file, text, doc: yaml.load(text) as Workflow };
     });
+}
+
+/** Only these steps are executed below; the rest of a workflow is never run here. */
+const callsScript = (step: Step) => (step.run ?? "").includes("scripts/loop-inflight.mjs");
+
+/**
+ * Runs a step's `run:` script the way Actions does (bash -eo pipefail, `${{ }}`
+ * expressions already substituted) in an empty repo, with a stub `gh` and one of:
+ * no scripts/loop-inflight.mjs, one that always exits 1, or one that records its calls.
+ */
+function runStep(step: Step, script: "absent" | "fail" | "record", opts: { snapshot?: boolean } = {}) {
+  if (!step.run) return { status: 0, calls: [] as string[][], outputs: "" };
+  const dir = mkdtempSync(join(tmpdir(), "loop-step-"));
+  const temp = join(dir, "runner-temp");
+  const bin = join(dir, "bin");
+  mkdirSync(temp);
+  mkdirSync(bin);
+  const calls = join(dir, "calls.jsonl");
+  const outputs = join(dir, "github-output");
+  writeFileSync(outputs, "");
+  if (opts.snapshot) writeFileSync(join(temp, "inflight.json"), "{}");
+  writeFileSync(
+    join(bin, "gh"),
+    `#!/bin/sh\ncase " $* " in *" --jq "*) echo 5 ;; *) echo '[{"number":5,"labels":[]}]' ;; esac\n`,
+  );
+  chmodSync(join(bin, "gh"), 0o755);
+  if (script !== "absent") {
+    mkdirSync(join(dir, "scripts"));
+    writeFileSync(
+      join(dir, "scripts", "loop-inflight.mjs"),
+      script === "fail"
+        ? "process.exit(1);\n"
+        : [
+            'import { appendFileSync, writeFileSync } from "node:fs";',
+            "const args = process.argv.slice(2);",
+            `appendFileSync(${JSON.stringify(calls)}, JSON.stringify(args) + "\\n");`,
+            'if (args[0] === "collect") writeFileSync(args[args.indexOf("--out") + 1], "{}");',
+            'if (args[0] === "digest") console.log("stub digest");',
+          ].join("\n"),
+    );
+  }
+  const expr = /\$\{\{[^}]*\}\}/g;
+  const env = Object.fromEntries(Object.entries(step.env ?? {}).map(([k, v]) => [k, String(v).replace(expr, "0")]));
+  const res = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run.replace(expr, "0")], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...env, PATH: `${bin}:${process.env.PATH}`, HOME: dir, RUNNER_TEMP: temp, GITHUB_OUTPUT: outputs } as unknown as NodeJS.ProcessEnv,
+  });
+  return {
+    status: res.status,
+    calls: existsSync(calls)
+      ? readFileSync(calls, "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[])
+      : [],
+    outputs: readFileSync(outputs, "utf8"),
+  };
 }
 
 describe("the loop template wiring", () => {
@@ -367,30 +457,43 @@ describe("the loop template wiring", () => {
     }
   });
 
-  it("the Scout, Redraft and Builder all read the in-flight digest", () => {
-    const byFile = Object.fromEntries(templateWorkflows().map((w) => [w.file, w.text]));
+  it("the Scout, Redraft and Builder collect the digest, hand it to the agent, then run the check", () => {
+    const byFile = Object.fromEntries(templateWorkflows().map((w) => [w.file, w.doc]));
     for (const file of ["claude-scout.yml", "claude-redraft.yml", "claude-builder.yml"]) {
-      expect(byFile[file], file).toContain("${{ steps.inflight.outputs.digest }}");
-      expect(byFile[file], file).toContain("node scripts/loop-inflight.mjs check");
+      const job = Object.values(byFile[file].jobs).find((j) => j.steps.some((s) => s.id === "inflight"));
+      expect(job, file).toBeTruthy();
+      const steps = job!.steps;
+      const collectAt = steps.findIndex((s) => s.id === "inflight");
+      const agentAt = steps.findIndex((s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action"));
+      expect(agentAt, file).toBeGreaterThan(collectAt);
+      expect(steps[agentAt].with?.prompt, file).toContain("${{ steps.inflight.outputs.digest }}");
+
+      const collected = runStep(steps[collectAt], "record");
+      expect(collected.status, file).toBe(0);
+      expect(collected.calls.map((c) => c[0]), file).toEqual(["collect", "digest"]);
+      expect(collected.outputs, file).toContain("digest<<INFLIGHTEOF\nstub digest\nINFLIGHTEOF");
+
+      const checks = steps
+        .slice(collectAt + 1)
+        .filter(callsScript)
+        .flatMap((s) => runStep(s, "record", { snapshot: true }).calls)
+        .filter((c) => c[0] === "check");
+      expect(checks.length, file).toBeGreaterThan(0);
+      for (const c of checks) expect(c[c.indexOf("--in") + 1], file).toMatch(/inflight\.json$/);
     }
   });
 
-  it("no call to the script can turn a run red, even before the script is installed", () => {
+  it("no step that calls the script can turn a run red, whether it is missing, failing or working", () => {
     for (const { file, doc } of templateWorkflows()) {
       for (const job of Object.values(doc.jobs)) {
         for (const step of job.steps ?? []) {
-          const run = step.run ?? "";
-          if (!run.includes("scripts/loop-inflight.mjs")) continue;
+          if (!callsScript(step)) continue;
           const where = `${file} → ${step.name}`;
-          // Guarded by an existence check, so a repo that got the workflow before the
-          // script is warned, not failed.
-          expect(run, where).toMatch(/\[ (!\s)?-f scripts\/loop-inflight\.mjs \]/);
-          // Every invocation swallows its own exit status.
-          const invocations = run
-            .replace(/\\\n\s*/g, " ")
-            .split("\n")
-            .filter((l) => l.includes("node scripts/loop-inflight.mjs"));
-          for (const line of invocations) expect(line, where).toMatch(/\|\| true\)?\s*$/);
+          for (const script of ["absent", "fail", "record"] as const) {
+            for (const snapshot of [false, true]) {
+              expect(runStep(step, script, { snapshot }).status, `${where} (${script}, snapshot=${snapshot})`).toBe(0);
+            }
+          }
         }
       }
     }

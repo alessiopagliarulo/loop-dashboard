@@ -224,7 +224,7 @@ export function collect({ repo, lookbackDays = DEFAULT_LOOKBACK_DAYS, now = new 
     draft: !!p.isDraft,
     branch: p.headRefName ?? "",
     author: p.author?.login ?? "",
-    loop: isLoopAuthor(p.author?.login) || String(p.headRefName ?? "").startsWith("claude/"),
+    loop: isLoopAuthor(p.author?.login),
     date: p.updatedAt ?? null,
     refs: referencedIssues(p.title, p.body, p.headRefName),
   }));
@@ -243,7 +243,7 @@ export function collect({ repo, lookbackDays = DEFAULT_LOOKBACK_DAYS, now = new 
       url: p.url,
       branch: p.headRefName ?? "",
       author: p.author?.login ?? "",
-      loop: isLoopAuthor(p.author?.login) || String(p.headRefName ?? "").startsWith("claude/"),
+      loop: isLoopAuthor(p.author?.login),
       date: p.mergedAt ?? null,
       refs: referencedIssues(p.title, p.body, p.headRefName),
     }));
@@ -294,7 +294,7 @@ export function collect({ repo, lookbackDays = DEFAULT_LOOKBACK_DAYS, now = new 
       branch: n.name,
       url: `${base}/compare/${encodeURIComponent(defaultBranch)}...${n.name.split("/").map(encodeURIComponent).join("/")}`,
       author: n.target?.author?.user?.login ?? n.target?.author?.name ?? "",
-      loop: isLoopAuthor(who) || n.name.startsWith("claude/"),
+      loop: isLoopAuthor(who),
       date: n.target?.committedDate ?? null,
       headline: n.target?.messageHeadline ?? "",
       ahead: null,
@@ -546,8 +546,8 @@ export function coverComment(matches) {
 /* ------------------------------------------------------------------ */
 
 /**
- * The encoder, installed into LOOP_EMBED_DIR on first use (the workflows cache that
- * folder, model weights included, so this is a download once, not every run).
+ * The encoder, installed on demand into LOOP_EMBED_DIR (under RUNNER_TEMP) each run that
+ * needs it; nothing is cached between runs, since a fresh install takes seconds.
  */
 async function loadEncoder() {
   const dir = process.env.LOOP_EMBED_DIR;
