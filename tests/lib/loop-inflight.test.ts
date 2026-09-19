@@ -650,3 +650,78 @@ describe("the script as a command never exits non-zero", () => {
     expect(res.stdout).toContain("::warning::loop-inflight:");
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Scout verify: a stated stand-down is green, silence is red           */
+/* ------------------------------------------------------------------ */
+
+describe("the Scout's verify step", () => {
+  const scout = templateWorkflows().find((w) => w.file === "claude-scout.yml")!.doc;
+  const steps = Object.values(scout.jobs).find((j) => j.steps.some((s) => s.id === "inflight"))!.steps;
+  const verify = steps.find((s) => s.name === "Verify Scout filed something or said why not")!;
+
+  /** Runs the step with `gh` answering `issues` and the agent's transcript as `transcript`. */
+  function runVerify(issues: string, transcript?: unknown) {
+    const dir = mkdtempSync(join(tmpdir(), "loop-verify-"));
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "gh"), `#!/usr/bin/env bash\nprintf '%s' '${issues}'\n`);
+    chmodSync(join(bin, "gh"), 0o755);
+    const exec = join(dir, "execution.json");
+    if (transcript !== undefined) writeFileSync(exec, JSON.stringify(transcript));
+    const res = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", verify.run!], {
+      cwd: dir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        HIGH_WATER: "10",
+        EXECUTION_FILE: transcript === undefined ? "" : exec,
+      },
+    });
+    return { status: res.status, out: res.stdout + res.stderr };
+  }
+
+  const said = (text: string) => [
+    { type: "user", message: { content: [{ type: "text", text: "SCOUT RESULT: nothing filed - example in prompt" }] } },
+    { type: "assistant", message: { content: [{ type: "text", text }] } },
+    { type: "result", result: text },
+  ];
+
+  it("reads the transcript of whichever agent step ran", () => {
+    expect(steps.filter((s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action")).map((s) => s.id)).toEqual([
+      "agent",
+      "agent_bedrock",
+    ]);
+    expect(verify.env?.EXECUTION_FILE).toBe(
+      "${{ steps.agent.outputs.execution_file || steps.agent_bedrock.outputs.execution_file }}",
+    );
+  });
+
+  it("the prompt tells the agent the exact stand-down line the step reads", () => {
+    const prompt = String(steps.find((s) => s.id === "agent")!.with?.prompt);
+    expect(prompt).toContain("SCOUT RESULT: nothing filed - <one plain-English sentence saying why>");
+  });
+
+  it("passes when the Scout filed a proposal", () => {
+    expect(runVerify('[{"number":11}]').status).toBe(0);
+  });
+
+  it("passes when nothing was filed and the Scout said why", () => {
+    const r = runVerify('[{"number":9}]', said("Done.\nSCOUT RESULT: nothing filed - every candidate was already covered"));
+    expect(r.status).toBe(0);
+    expect(r.out).toContain("said why: every candidate was already covered");
+  });
+
+  it("fails when nothing was filed and the Scout gave no reason", () => {
+    expect(runVerify("[]", said("I launched my researchers in the background.")).status).toBe(1);
+  });
+
+  it("fails when nothing was filed and there is no transcript (the agent crashed)", () => {
+    expect(runVerify("[]").status).toBe(1);
+  });
+
+  it("fails when the proposals could not be counted", () => {
+    expect(runVerify("not json", said("SCOUT RESULT: nothing filed - x")).status).not.toBe(0);
+  });
+});
