@@ -259,30 +259,25 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # The duplicate detector's library and MiniLM weights live in $RUNNER_TEMP/loop-embed
-      # (the script points the model cache inside it). Cache that folder between runs,
-      # keyed on the pinned library version and model read from the script, so an hourly
-      # run does not re-install and re-download them. A miss or a cache-service error only
-      # means the check installs them fresh, as before; neither step can fail the run.
+      # (the script points the model cache inside it). Restore that folder under a key
+      # the script derives from its pinned library and model, so an hourly run does not
+      # re-install and re-download them. After a miss it is saved only once the check
+      # reports the detector loaded, so a half-finished install is never cached. A miss
+      # or a cache-service error only means the check installs them fresh, as before.
       - name: Key the duplicate detector cache
         id: embedkey
         if: steps.gate.outputs.go == 'true'
         continue-on-error: true
         run: |
-          lib=""; model=""
           if [ -f scripts/loop-inflight.mjs ]; then
-            lib=$(sed -n 's/^export const EMBED_LIB_VERSION = "\(.*\)";$/\1/p' scripts/loop-inflight.mjs || true)
-            model=$(sed -n 's/^export const EMBED_MODEL = "\(.*\)";$/\1/p' scripts/loop-inflight.mjs || true)
-          fi
-          if [ -n "$lib" ] && [ -n "$model" ]; then
-            echo "key=loop-embed-$RUNNER_OS-transformers-$lib-$(echo "$model" | tr '/' '_')" >> "$GITHUB_OUTPUT"
-          else
-            echo "Could not read the pinned embedding library and model — the check installs them fresh."
+            node scripts/loop-inflight.mjs embed-key || true
           fi
 
       - name: Restore the duplicate detector cache
+        id: embedcache
         if: steps.gate.outputs.go == 'true' && steps.embedkey.outputs.key != ''
         continue-on-error: true
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/loop-embed
           key: ${{ steps.embedkey.outputs.key }}
@@ -331,6 +326,14 @@ jobs:
           else
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Save the duplicate detector cache
+        if: steps.gate.outputs.go == 'true' && steps.embedkey.outputs.key != '' && steps.embedcache.outputs.cache-hit != 'true' && steps.coverage.outputs.embed == 'loaded'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/loop-embed
+          key: ${{ steps.embedkey.outputs.key }}
 
       - if: steps.gate.outputs.go == 'true' && steps.coverage.outputs.proceed != 'false' && steps.ai.outputs.use_bedrock != 'true'
         uses: anthropics/claude-code-action@v1

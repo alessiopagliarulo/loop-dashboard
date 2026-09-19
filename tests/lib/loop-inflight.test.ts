@@ -483,27 +483,34 @@ describe("the loop template wiring", () => {
     }
   });
 
-  it("the Scout, Redraft and Builder cache the duplicate detector, keyed on the pinned library and model", () => {
+  it("the Scout, Redraft and Builder restore the detector's cache, and save it only after a miss that loaded it", () => {
     const byFile = Object.fromEntries(templateWorkflows().map((w) => [w.file, w.doc]));
-    const expected = `loop-embed-Linux-transformers-${inflight.EMBED_LIB_VERSION}-${inflight.EMBED_MODEL.replace("/", "_")}`;
+    const expected = `loop-embed-Linux-${process.arch}-transformers-${inflight.EMBED_LIB_VERSION}-Xenova_all-MiniLM-L6-v2`;
     for (const file of ["claude-scout.yml", "claude-redraft.yml", "claude-builder.yml"]) {
       const steps = Object.values(byFile[file].jobs).find((j) => j.steps.some((s) => s.id === "embedkey"))?.steps;
       expect(steps, file).toBeTruthy();
       const keyAt = steps!.findIndex((s) => s.id === "embedkey");
-      const cacheAt = steps!.findIndex((s) => String(s.uses ?? "").startsWith("actions/cache@"));
+      const restoreAt = steps!.findIndex((s) => String(s.uses ?? "").startsWith("actions/cache/restore@"));
       const checkAt = steps!.findIndex((s) => (s.run ?? "").includes("loop-inflight.mjs check"));
+      const saveAt = steps!.findIndex((s) => String(s.uses ?? "").startsWith("actions/cache/save@"));
+      expect(steps!.some((s) => /^actions\/cache@/.test(String(s.uses ?? ""))), file).toBe(false);
       expect(keyAt, file).toBeGreaterThan(-1);
-      expect(cacheAt, file).toBeGreaterThan(keyAt);
-      expect(checkAt, file).toBeGreaterThan(cacheAt);
-      const cache = steps![cacheAt];
-      expect(cache.with?.path, file).toBe("${{ runner.temp }}/loop-embed");
-      expect(cache.with?.key, file).toBe("${{ steps.embedkey.outputs.key }}");
-      expect(cache.if, file).toContain("steps.embedkey.outputs.key != ''");
-      expect(cache["continue-on-error"], file).toBe(true);
+      expect(restoreAt, file).toBeGreaterThan(keyAt);
+      expect(checkAt, file).toBeGreaterThan(restoreAt);
+      expect(saveAt, file).toBeGreaterThan(checkAt);
+      const [restore, check, save] = [steps![restoreAt], steps![checkAt], steps![saveAt]];
+      for (const cache of [restore, save]) {
+        expect(cache.with?.path, file).toBe("${{ runner.temp }}/loop-embed");
+        expect(cache.with?.key, file).toBe("${{ steps.embedkey.outputs.key }}");
+        expect(cache.if, file).toContain("steps.embedkey.outputs.key != ''");
+        expect(cache["continue-on-error"], file).toBe(true);
+      }
+      expect(save.if, file).toContain(`steps.${restore.id}.outputs.cache-hit != 'true'`);
+      expect(save.if, file).toContain(`steps.${check.id}.outputs.embed == 'loaded'`);
       expect(steps![keyAt]["continue-on-error"], file).toBe(true);
-      expect(steps![checkAt].run, file).toContain('LOOP_EMBED_DIR="$RUNNER_TEMP/loop-embed"');
+      expect(check.run, file).toContain('LOOP_EMBED_DIR="$RUNNER_TEMP/loop-embed"');
 
-      // The key step reads the real script's pins; a changed version or model is a new key.
+      // The key step asks the real script, so a changed pin is a new key.
       const dir = mkdtempSync(join(tmpdir(), "loop-embedkey-"));
       mkdirSync(join(dir, "scripts"));
       writeFileSync(join(dir, "scripts", "loop-inflight.mjs"), readFileSync(SCRIPT, "utf8"));
@@ -582,6 +589,58 @@ describe("the script as a command never exits non-zero", () => {
     expect(res.status).toBe(0);
     expect(res.stdout).toContain("::warning::Couldn't read #5");
     expect(readFileSync(outputs, "utf8")).toContain("covered=");
+  });
+
+  /** A LOOP_EMBED_DIR holding a stand-in encoder, and a `gh` that returns one long idea. */
+  function checkWithEncoder(pipelineBody: string) {
+    const root = mkdtempSync(join(tmpdir(), "loop-encoder-"));
+    const embed = join(root, "embed");
+    const lib = join(embed, "node_modules", "@huggingface", "transformers");
+    mkdirSync(lib, { recursive: true });
+    writeFileSync(join(embed, "package.json"), '{"private":true}\n');
+    writeFileSync(join(lib, "package.json"), '{"name":"@huggingface/transformers","type":"module","main":"index.js"}\n');
+    writeFileSync(
+      join(lib, "index.js"),
+      `export const env = {};\nexport async function pipeline() { ${pipelineBody} }\n`,
+    );
+    const issue = { number: 5, title: "Idea", body: "word ".repeat(400), url: "https://github.com/acme/shop/issues/5", labels: [], comments: [] };
+    writeFileSync(join(root, "gh"), `#!/bin/sh\ncat <<'EOF'\n${JSON.stringify(issue)}\nEOF\n`);
+    chmodSync(join(root, "gh"), 0o755);
+    const snapshot = join(root, "inflight.json");
+    writeFileSync(snapshot, JSON.stringify({ repo: "acme/shop", openPrs: [], branches: [], mergedPrs: [], commits: [], ideas: [], unavailable: [] }));
+    const outputs = join(root, "github-output");
+    writeFileSync(outputs, "");
+    const res = spawnSync(process.execPath, [SCRIPT, "check", "--in", snapshot, "--issues", "5", "--mode", "new", "--dry-run"], {
+      cwd: root,
+      encoding: "utf8",
+      env: { PATH: `${root}:${process.env.PATH}`, HOME: root, LOOP_EMBED_DIR: embed, GITHUB_OUTPUT: outputs } as unknown as NodeJS.ProcessEnv,
+    });
+    return { status: res.status, stdout: res.stdout, outputs: readFileSync(outputs, "utf8") };
+  }
+
+  it("check reports embed=loaded once the detector loads, so the workflows may cache it", () => {
+    const res = checkWithEncoder(
+      "return async (batch) => ({ dims: [batch.length, 2], data: Float32Array.from(batch.flatMap(() => [1, 0])) });",
+    );
+    expect(res.status).toBe(0);
+    expect(res.outputs).toContain("embed=loaded\n");
+  });
+
+  it("check never reports embed=loaded when the detector fails to load, so a broken install is not cached", () => {
+    const res = checkWithEncoder('throw new Error("weights download failed");');
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("::warning::The duplicate detector could not run (weights download failed)");
+    expect(res.outputs).not.toContain("embed=");
+  });
+
+  it("embed-key prints the cache key from the pinned library, model, OS and architecture", () => {
+    const outputs = join(dir, "embed-key-output");
+    writeFileSync(outputs, "");
+    const res = run(["embed-key"], { RUNNER_OS: "macOS", GITHUB_OUTPUT: outputs });
+    expect(res.status).toBe(0);
+    const key = `loop-embed-macOS-${process.arch}-transformers-${inflight.EMBED_LIB_VERSION}-Xenova_all-MiniLM-L6-v2`;
+    expect(res.stdout.trim()).toBe(key);
+    expect(readFileSync(outputs, "utf8")).toBe(`key=${key}\n`);
   });
 
   it("an unknown command or a missing file is a warning, not a failure", () => {

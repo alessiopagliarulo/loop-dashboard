@@ -36,6 +36,10 @@
  *       links to what covers it. It never closes, never re-labels anything else.
  *       Needs LOOP_EMBED_DIR, a folder for @huggingface/transformers and the model
  *       weights; installed there on demand, and the workflows cache that folder.
+ *       Sets the step output `embed=loaded` once the detector has loaded.
+ *   node scripts/loop-inflight.mjs embed-key
+ *       Sets the step output `key`: the cache key for LOOP_EMBED_DIR, from the pinned
+ *       library version and model, the runner's OS and CPU architecture.
  *
  * NOTHING HERE MAY FAIL A RUN. Every command exits 0 and says what it could not do
  * as a `::warning::`. A missing digest makes the agents slightly blinder; a red
@@ -545,11 +549,16 @@ export function coverComment(matches) {
 /* Embedding (check only)                                              */
 /* ------------------------------------------------------------------ */
 
+/** The cache key for LOOP_EMBED_DIR: a new pin, OS or architecture is a new cache. */
+export function embedCacheKey(os = process.env.RUNNER_OS || process.platform, arch = process.arch) {
+  return `loop-embed-${os}-${arch}-transformers-${EMBED_LIB_VERSION}-${EMBED_MODEL.replace(/\//g, "_")}`;
+}
+
 /**
  * The encoder, installed on demand into LOOP_EMBED_DIR (under RUNNER_TEMP), with the
  * model weights downloaded into LOOP_EMBED_DIR/models. The Scout, Builder and Redraft
- * workflows cache that whole folder (actions/cache, keyed on EMBED_LIB_VERSION and
- * EMBED_MODEL), so a warm run skips both; a cold one installs and downloads as here.
+ * workflows restore that whole folder under embedCacheKey(), and save it only after a
+ * miss on which `check` reported `embed=loaded`, so a broken install is never cached.
  */
 async function loadEncoder() {
   const dir = process.env.LOOP_EMBED_DIR;
@@ -663,6 +672,7 @@ async function cmdCheck(argv) {
     try {
       console.log(`Embedding ${docs.length} document(s) with ${EMBED_MODEL} (threshold ${EMBED_THRESHOLD})…`);
       const encode = await loadEncoder();
+      setOutput("embed", "loaded");
       const vectors = await encode(docs.map(docText));
       docs.forEach((d, i) => byUrl.set(d.url, vectors[i]));
     } catch (err) {
@@ -723,7 +733,13 @@ async function main(argv) {
     await cmdCheck(argv);
     return;
   }
-  throw new Error(`unknown command '${cmd ?? ""}' — use collect, digest or check`);
+  if (cmd === "embed-key") {
+    const key = embedCacheKey();
+    setOutput("key", key);
+    console.log(key);
+    return;
+  }
+  throw new Error(`unknown command '${cmd ?? ""}' — use collect, digest, check or embed-key`);
 }
 
 const invokedDirectly = (() => {
