@@ -8,7 +8,7 @@ const AGENTS: { value: string; label: string; blurb: string }[] = [
   { value: "all", label: "All agents", blurb: "Every agent gets it" },
   { value: "scout", label: "Scout", blurb: "Finds work, files proposals" },
   { value: "builder", label: "Builder", blurb: "Writes code, opens PRs" },
-  { value: "audit", label: "Auditor", blurb: "Reviews every PR" },
+  { value: "audit", label: "Auditor", blurb: "Reviews loop PRs" },
   { value: "retro", label: "Retro", blurb: "Reviews how the loop is doing" },
   { value: "mention", label: "Mention", blurb: "Replies when you write @claude" },
   { value: "demo", label: "Demo", blurb: "Captures screenshots / video" },
