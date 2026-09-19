@@ -15,6 +15,7 @@ import {
   primeDuplicateIndex,
   type DuplicateReport,
 } from "@/lib/dedup/queue-duplicates";
+import { COVERED_LABEL, latestCoverLinks, type CoverLink } from "@/lib/idea-coverage";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -35,6 +36,12 @@ export type IdeaSummary = {
   state: "open" | "closed";
   closedAt: string | null;
   stateReason: string | null;
+  /**
+   * For a live idea flagged `covered`: what already covers it, read from the loop's
+   * covered comment (see lib/idea-coverage.ts). An empty list means the flag is on
+   * but its links could not be read; absent on every idea without the flag.
+   */
+  coveredBy?: CoverLink[];
 };
 
 /** The four Ideas tabs, each with its issues. */
@@ -299,14 +306,36 @@ export async function loadIdeas(
   // and never blocks: it returns null on any failure and the screen is
   // unchanged. No text is embedded here — the vectors already exist. See
   // lib/dedup/queue-duplicates.ts for why this is not the deployed Lambda.
-  const duplicates = await findQueueDuplicates(repoConfig, [
-    ...waiting,
-    ...approved,
-    ...redraft,
-    ...closed,
+  const [duplicates] = await Promise.all([
+    findQueueDuplicates(repoConfig, [...waiting, ...approved, ...redraft, ...closed]),
+    attachCoverLinks(repoConfig, [...waiting, ...approved, ...redraft]),
   ]);
 
   return { waiting, approved, redraft, closed, duplicates };
+}
+
+/** Covered ideas whose links are looked up per load — one comment listing each. */
+const MAX_COVERED_LOOKUPS = 20;
+
+/**
+ * Fill `coveredBy` on every live idea carrying the `covered` flag, from the newest
+ * covered comment on its thread. One extra request per FLAGGED idea only, and a
+ * failed one leaves an empty list (the chip still shows; the links are one tap away
+ * on GitHub) rather than failing the whole Ideas screen.
+ */
+async function attachCoverLinks(repoConfig: RepoConfig, ideas: IdeaSummary[]): Promise<void> {
+  const flagged = ideas.filter((i) => i.labels.includes(COVERED_LABEL)).slice(0, MAX_COVERED_LOOKUPS);
+  await Promise.all(
+    flagged.map(async (idea) => {
+      try {
+        const comments = await listThreadComments(idea.number, repoConfig);
+        idea.coveredBy = latestCoverLinks(comments, repoConfig) ?? [];
+      } catch (err) {
+        console.warn(`ideas: couldn't read the covered note on #${idea.number}`, err);
+        idea.coveredBy = [];
+      }
+    }),
+  );
 }
 
 /**

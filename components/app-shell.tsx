@@ -150,7 +150,9 @@ function shortLabel(label: string) {
 function LogoutButton({ compact = false }: { compact?: boolean }) {
   async function logout() {
     await fetch("/api/logout", { method: "POST" });
-    window.location.href = "/login";
+    // A full page load, not a client-side push: signing out must drop every
+    // piece of client state, and `replace` keeps Back from reopening the app.
+    window.location.replace("/login");
   }
   return (
     <button

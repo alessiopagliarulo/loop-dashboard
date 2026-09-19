@@ -66,6 +66,8 @@ flowchart LR
 
 The human sits in exactly two places, and nothing crosses either without them: **nothing gets built until a person approves the idea**, and **nothing gets merged until a person merges it**.
 
+**Working on a loop repo by hand? Push the branch right away — a draft pull request is best.** Before the Scout proposes, the Redraft agent rewrites, or the Builder builds, the loop reads every open PR (drafts included), every branch pushed in the last 14 days, recent merges, and every idea already filed, so it does not draft or build what already exists. It only sees what is on GitHub: work that exists only on your laptop is invisible to it. An idea that existing work already covers is flagged **Already covered** on its card, with a link to what covers it. How it works: [`config/loop-template/files/DASHBOARD-CONTRACT.md`](config/loop-template/files/DASHBOARD-CONTRACT.md) §8.
+
 **The dashboard is the decision layer; GitHub Actions is the execution layer.** They share no runtime and no database — state lives in GitHub issues, labels and pull requests, and four labels are the state machine (`proposal` → `approved` | `redraft` | `declined`). There is no Postgres, no SQLite, no Redis, no DynamoDB; grep the dependency tree and you will not find a database client. The cost of that is recorded next to the choice: no transactions, no concurrent-write safety, no querying, and GitHub's rate limits.
 
 The nine agents, the Auditor's five role-specialised reviewers, and why Retro proposes changes to the loop's own instructions rather than making them: → [`docs/the-loop.md`](docs/the-loop.md)

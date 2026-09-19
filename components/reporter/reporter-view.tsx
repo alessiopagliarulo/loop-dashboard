@@ -164,7 +164,8 @@ export default function ReporterView({
       ? (summaryJobState.error ?? "Couldn't summarize.")
       : null);
 
-  const items = digest?.items ?? [];
+  // Memoised so a digest-less render doesn't hand every hook below a fresh `[]`.
+  const items = useMemo(() => digest?.items ?? [], [digest]);
 
   // Counts per category / source for the filter chips.
   const catCounts = useMemo(() => {

@@ -9,9 +9,10 @@
  *   config/loop-template/workflows/  — the .github/workflows/*.yml agents
  *   config/loop-template/files/      — every OTHER baseline file (.mcp.json,
  *                                      DASHBOARD-CONTRACT.md, loop-brief.md,
- *                                      loop-metrics.mjs). Flat filenames; where
- *                                      each one installs in a target repo is
- *                                      declared by TEMPLATE_FILE_TARGETS.
+ *                                      loop-metrics.mjs, loop-inflight.mjs).
+ *                                      Flat filenames; where each one installs
+ *                                      in a target repo is declared by
+ *                                      TEMPLATE_FILE_TARGETS.
  *
  * The template is now the SINGLE source of truth for a new project. Onboarding
  * reads it and nothing else — there is deliberately no pilot fallback, because
@@ -50,6 +51,7 @@ export const TEMPLATE_FILE_TARGETS: Record<string, string> = {
   "DASHBOARD-CONTRACT.md": "docs/DASHBOARD-CONTRACT.md",
   "loop-brief.md": "docs/loop-brief.md",
   "loop-metrics.mjs": "scripts/loop-metrics.mjs",
+  "loop-inflight.mjs": "scripts/loop-inflight.mjs",
 };
 
 const PILOT_REPO: RepoConfig = { owner: PILOT_PROJECT.owner, repo: PILOT_PROJECT.repo };

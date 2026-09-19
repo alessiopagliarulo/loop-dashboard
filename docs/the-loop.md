@@ -46,6 +46,8 @@ The nine agents:
 | **@mention** | `@claude` in any comment | Wakes an agent from the GitHub phone app. The remote control. |
 | **Tool installer** | dashboard event | Wires a newly requested tool or skill into the right workflow. |
 
+**The Scout, Redraft and Builder read the work in flight first.** The owner also builds things by hand, and the loop kept proposing — and once or twice building — what was already sitting on a branch or merged last week. So before any of the three acts, `scripts/loop-inflight.mjs` (installed from `config/loop-template/files/`) gathers every open PR including drafts, every branch pushed recently without a PR, recent merges, and every idea already filed or closed. A deterministic backstop then flags an idea `covered` — with a link — when a person's work names it, or when the same MiniLM duplicate detector the Ideas page uses scores it as the same request. It flags; it never closes. The owner's side of the bargain is one habit: push local work early, ideally as a draft PR. Full contract: `DASHBOARD-CONTRACT.md` §8.
+
 Two details worth knowing, because the obvious guess about each is wrong:
 
 **The Auditor's five reviewers are role-specialised, not five copies of the same prompt.** They are Correctness ("trace the logic, find the bug"), Regression ("what breaks — check every caller and import"), Security ("secrets, injection, authz, unsafe deps, exposed endpoints"), Tests ("name the failing case this PR misses"), and Simplicity ("dead code, duplication, over-engineering"). They run as blocking subagents in one message; the parent verifies each finding itself before posting a single SHIP / FIX FIRST / DO NOT MERGE verdict. This is where tokens are deliberately spent.

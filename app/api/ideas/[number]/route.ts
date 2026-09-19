@@ -7,6 +7,7 @@ import {
 } from "@/lib/github";
 import { listThreadComments, closeIssue, getIssue } from "@/lib/queues";
 import { STALE_LABEL } from "@/lib/idea-staleness";
+import { COVERED_LABEL } from "@/lib/idea-coverage";
 import { resolveProject, resolveProjectFromUrl, ProjectError } from "@/lib/projects";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +42,8 @@ type ActionBody = {
     | "redraft"
     | "decline"
     | "reject"
-    | "unstale";
+    | "unstale"
+    | "uncover";
   text?: string;
   project?: string;
 };
@@ -54,8 +56,13 @@ type ActionBody = {
  * about the thing the warning was about — so any of them clears it. Leaving it
  * on through an approve/redraft/decline would leave an amber banner sitting
  * over an idea whose staleness the owner has already answered.
+ *
+ * `covered` works the same way: approving or redrafting an idea the loop flagged as
+ * already covered IS the owner saying "build it anyway" / "rework it", and the loop
+ * never re-flags an idea whose flag was cleared (its marker comment stays on the
+ * thread, and the workflows check for it).
  */
-const QUEUE_LABELS = ["proposal", "approved", "redraft", "declined", "stale"] as const;
+const QUEUE_LABELS = ["proposal", "approved", "redraft", "declined", "stale", "covered"] as const;
 
 /**
  * The exact label set an issue should end up with after `action`, computed
@@ -114,6 +121,9 @@ async function wake(
  *  unstale   : drop the `stale` warning, leaving the idea approved. The owner
  *              looked at what the Scout flagged and decided the idea still
  *              stands. Nothing else moves.
+ *  uncover   : drop the `covered` flag, leaving the idea where it is. The owner
+ *              looked at the work the loop said already covers it and disagrees.
+ *              The loop will not flag it again.
  *
  * Body carries a `project` field so the mutation targets the right repo.
  */
@@ -153,7 +163,7 @@ export async function POST(
       { status: 400 },
     );
   }
-  if (!["approve", "unapprove", "redraft", "decline", "unstale"].includes(action)) {
+  if (!["approve", "unapprove", "redraft", "decline", "unstale", "uncover"].includes(action)) {
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   }
 
@@ -185,6 +195,19 @@ export async function POST(
         await setIssueLabels(
           issueNumber,
           current.filter((l) => l !== STALE_LABEL),
+          repo,
+        );
+        return NextResponse.json({ ok: true, changed: true });
+      }
+      case "uncover": {
+        // Same shape as `unstale`: only the flag comes off, and a no-op when it
+        // is already gone.
+        if (!current.includes(COVERED_LABEL)) {
+          return NextResponse.json({ ok: true, changed: false });
+        }
+        await setIssueLabels(
+          issueNumber,
+          current.filter((l) => l !== COVERED_LABEL),
           repo,
         );
         return NextResponse.json({ ok: true, changed: true });
