@@ -158,6 +158,10 @@ describe("the loop's PR agents run on loop PRs only", () => {
         expect(runs(file, prEvent("claude/issue-1", "claude[bot]", "stranger/shop"))).toBe(false);
       });
 
+      it("is skipped on a branch with claude/ in the middle, even when opened by the loop identity", () => {
+        expect(runs(file, prEvent("fm/claude/x", "claude[bot]"))).toBe(false);
+      });
+
       it("still runs on a manual workflow_dispatch, which is the owner asking", () => {
         expect(runs(file, { github: { event_name: "workflow_dispatch", repository: REPO, event: {} } })).toBe(true);
       });
