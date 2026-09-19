@@ -338,11 +338,36 @@ jobs:
           claude_args: *redraft_claude_args
           prompt: *redraft_prompt
 
+      # The duplicate detector's library and MiniLM weights live in $RUNNER_TEMP/loop-embed
+      # (the script points the model cache inside it). Restore that folder under a key
+      # the script derives from its pinned library and model, so an hourly run does not
+      # re-install and re-download them. After a miss it is saved only once the check
+      # reports the detector loaded, so a half-finished install is never cached. A miss
+      # or a cache-service error only means the check installs them fresh, as before.
+      - name: Key the duplicate detector cache
+        id: embedkey
+        if: success() && steps.meta.outputs.issue_number != ''
+        continue-on-error: true
+        run: |
+          if [ -f scripts/loop-inflight.mjs ]; then
+            node scripts/loop-inflight.mjs embed-key || true
+          fi
+
+      - name: Restore the duplicate detector cache
+        id: embedcache
+        if: success() && steps.meta.outputs.issue_number != '' && steps.embedkey.outputs.key != ''
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/loop-embed
+          key: ${{ steps.embedkey.outputs.key }}
+
       # Backstop, same as the Scout's: the dashboard's own duplicate detector plus any
       # PR, branch or commit that names this idea. Flags it `covered` with a link if the
       # rewrite still duplicates existing work; skips it if the agent already flagged it,
       # or if the owner cleared a flag on it before. Never fails the run.
       - name: Flag the idea if existing work already covers it
+        id: coverage
         if: success() && steps.meta.outputs.issue_number != ''
         continue-on-error: true
         env:
@@ -356,6 +381,14 @@ jobs:
           fi
           LOOP_EMBED_DIR="$RUNNER_TEMP/loop-embed" \
             node scripts/loop-inflight.mjs check --in "$file" --issues "$ISSUE_NUMBER" --mode new || true
+
+      - name: Save the duplicate detector cache
+        if: success() && steps.meta.outputs.issue_number != '' && steps.embedkey.outputs.key != '' && steps.embedcache.outputs.cache-hit != 'true' && steps.coverage.outputs.embed == 'loaded'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/loop-embed
+          key: ${{ steps.embedkey.outputs.key }}
 
       # A green tick does not mean the labels flipped. The failure mode warned about above —
       # a lovely rewrite that never runs `gh issue edit --remove-label` — orphans the idea

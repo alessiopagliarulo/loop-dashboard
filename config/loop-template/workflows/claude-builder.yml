@@ -258,6 +258,30 @@ jobs:
             echo "INFLIGHTEOF"
           } >> "$GITHUB_OUTPUT"
 
+      # The duplicate detector's library and MiniLM weights live in $RUNNER_TEMP/loop-embed
+      # (the script points the model cache inside it). Restore that folder under a key
+      # the script derives from its pinned library and model, so an hourly run does not
+      # re-install and re-download them. After a miss it is saved only once the check
+      # reports the detector loaded, so a half-finished install is never cached. A miss
+      # or a cache-service error only means the check installs them fresh, as before.
+      - name: Key the duplicate detector cache
+        id: embedkey
+        if: steps.gate.outputs.go == 'true'
+        continue-on-error: true
+        run: |
+          if [ -f scripts/loop-inflight.mjs ]; then
+            node scripts/loop-inflight.mjs embed-key || true
+          fi
+
+      - name: Restore the duplicate detector cache
+        id: embedcache
+        if: steps.gate.outputs.go == 'true' && steps.embedkey.outputs.key != ''
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/loop-embed
+          key: ${{ steps.embedkey.outputs.key }}
+
       # ── Flag approved ideas that existing work already covers ──────────────────
       # Deterministic, before any model spends a token: an approved idea that a
       # person's PR, branch or commit names ("closes #12", `issue-12`), or whose text the
@@ -302,6 +326,14 @@ jobs:
           else
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Save the duplicate detector cache
+        if: steps.gate.outputs.go == 'true' && steps.embedkey.outputs.key != '' && steps.embedcache.outputs.cache-hit != 'true' && steps.coverage.outputs.embed == 'loaded'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/loop-embed
+          key: ${{ steps.embedkey.outputs.key }}
 
       - if: steps.gate.outputs.go == 'true' && steps.coverage.outputs.proceed != 'false' && steps.ai.outputs.use_bedrock != 'true'
         uses: anthropics/claude-code-action@v1
