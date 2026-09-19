@@ -116,8 +116,10 @@ agent at all.
   *"Never re-propose a declined idea, and never propose a near-variant of one."* ·
   *"A proposal with no `path:line` is not a proposal, it is a hunch. Drop it."* ·
   *"One subsystem each."* · *"If you found nothing worth doing this hour, file NOTHING."*
-- **Verifier:** a post-step fails the run (`exit 1`) if zero issues above the recorded
-  high-water mark carry `proposal`. A green run that did nothing is treated as a failure.
+- **Verifier:** a post-step passes if any issue above the recorded high-water mark carries
+  `proposal`. With zero filed it passes only if the agent's final message ends with
+  `SCOUT RESULT: nothing filed - <reason>` (read from the action's execution file, reason
+  logged); zero filed with no stated reason, or a failed count query, fails the run (`exit 1`).
 - **Special:** the only agent reading `scout.aiProvider` rather than the project-wide
   `aiProvider`, and it defaults to the Claude subscription even when the loop is on Bedrock —
   because **WebSearch is not available on Bedrock** and the Scout must cite dated sources
@@ -394,7 +396,8 @@ IS the state."*
   background researchers, announced it would wait for them, ended its turn, and filed zero
   issues. The run went green and the owner got nothing."*
 - **Green ticks are not trusted.** Scout, Redraft, Demo and Metrics each carry a post-run bash
-  verifier that turns a green-but-empty run red.
+  verifier that turns a green-but-empty run red (the Scout's passes an empty run only when the
+  agent stated why).
 - **Cheap bash gates precede expensive agents.** Scout, Builder and Retro each stand down in
   ~15 seconds of shell before a token is spent.
 - **Untrusted-data fencing is uniform.** Scout and Tool-installer wrap third-party text in
