@@ -1,6 +1,6 @@
 name: Claude — Auditor (adversarial PR review)
 
-# Every PR is torn apart by an INDEPENDENT agent before the owner ever sees it.
+# Every loop PR is torn apart by an INDEPENDENT agent before the owner ever sees it.
 # This is where tokens are deliberately spent: five parallel reviewers, each with a
 # different lens, then a verification pass that throws out anything unsubstantiated.
 # Goal: the owner should only ever be handed PRs that are actually safe to merge.
@@ -8,10 +8,10 @@ name: Claude — Auditor (adversarial PR review)
 on:
   # NOTE ON FORK PRs: `pull_request` runs a fork's PR with a read-only token and NO access
   # to repository secrets, so `secrets.CLAUDE_CODE_OAUTH_TOKEN` is empty and the agent step
-  # cannot authenticate — the audit will fail (or no-op) on any PR opened from a fork. That
-  # is deliberate: the alternative (`pull_request_target`) would run untrusted fork code with
-  # this repo's secrets, which is far worse. This loop's own PRs come from `claude/` branches
-  # in this repo, so they are unaffected. Fork PRs must be reviewed by hand, or re-audited via
+  # cannot authenticate. The job's `if:` below skips fork PRs outright (a loop PR comes from
+  # this repo), so a fork PR shows a skipped audit rather than a failed one. That is
+  # deliberate: the alternative (`pull_request_target`) would run untrusted fork code with
+  # this repo's secrets, which is far worse. Fork PRs must be reviewed by hand, or re-audited via
   # `workflow_dispatch` after the branch has been pulled into this repo.
   pull_request:
     types: [opened, synchronize, reopened]
@@ -28,6 +28,23 @@ concurrency:
 
 jobs:
   audit:
+    # LOOP PRs ONLY. The owner also pushes branches and opens PRs by hand (and their own
+    # Claude Code sessions can name a branch `claude/...`); those get the plain CI checks and
+    # no agent, because every agent run spends the owner's Claude subscription. A loop PR is
+    # a `claude/` branch in this repo, opened by the loop's own identity - the same author
+    # test scripts/loop-inflight.mjs uses (LOOP_AUTHOR_PATTERNS), kept identical by
+    # the dashboard's tests/lib/loop-pr-agents.test.ts. GitHub has no head-branch filter on the
+    # `pull_request` trigger (`branches:` filters the BASE branch), so this `if:` is the
+    # filter, and anything else shows as a skipped run, not a failed one. A manual
+    # `workflow_dispatch` is the owner asking, so it always runs.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (startsWith(github.event.pull_request.head.ref, 'claude/') &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (contains(github.event.pull_request.user.login, 'claude') ||
+      contains(github.event.pull_request.user.login, 'github-actions') ||
+      contains(github.event.pull_request.user.login, '[bot]') ||
+      contains(github.event.pull_request.user.login, 'anthropic')))
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:

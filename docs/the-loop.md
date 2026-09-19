@@ -39,12 +39,14 @@ The nine agents:
 | **Scout** | hourly | Researches the market and the codebase, files new ideas as issues labelled `proposal`. Never writes code. Stops filing when the open queue hits a configurable cap. |
 | **Redraft** | `redraft` label | Rewrites an idea to match the feedback comment and puts it back in the queue. |
 | **Builder** | `approved` label, 30-min backstop | Picks the strongest idea and opens exactly one PR from a `claude/` branch. |
-| **Auditor** | every PR | Spawns five adversarial reviewers, posts one verdict comment. |
-| **Demo** | `claude/` PRs | Boots the app, drives it in headless Chromium, uploads screenshots and video. |
+| **Auditor** | loop PRs | Spawns five adversarial reviewers, posts one verdict comment. |
+| **Demo** | loop PRs | Boots the app, drives it in headless Chromium, uploads screenshots and video. |
 | **Retro** | weekly | Reviews what got approved, ignored, or merged; proposes edits to the loop's own instructions. |
 | **Metrics** | daily, every PR | Plain reporting job, no AI. Writes the numbers up. |
 | **@mention** | `@claude` in any comment | Wakes an agent from the GitHub phone app. The remote control. |
 | **Tool installer** | dashboard event | Wires a newly requested tool or skill into the right workflow. |
+
+**Only loop PRs wake the Auditor and Demo.** A loop PR is one the Builder opened: a `claude/` branch in the repo, authored by the loop's own identity (the same author test the in-flight detection below uses). The owner's hand-made PRs, including ones from their own Claude Code sessions that also name a branch `claude/...`, get only the plain CI checks; the agent runs show as skipped, not failed. Every agent run spends the owner's Claude subscription, so nothing but approved ideas goes through the loop. Either agent can still be run on any PR by hand with `workflow_dispatch`.
 
 **The Scout, Redraft and Builder read the work in flight first.** The owner also builds things by hand, and the loop kept proposing — and once or twice building — what was already sitting on a branch or merged last week. So before any of the three acts, `scripts/loop-inflight.mjs` (installed from `config/loop-template/files/`) gathers every open PR including drafts, every branch pushed recently without a PR, recent merges, and every idea already filed or closed. A deterministic backstop then flags an idea `covered` — with a link — when a person's work names it, or when the same MiniLM duplicate detector the Ideas page uses scores it as the same request. It flags; it never closes. The owner's side of the bargain is one habit: push local work early, ideally as a draft PR. Full contract: `DASHBOARD-CONTRACT.md` §8.
 

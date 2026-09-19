@@ -119,10 +119,15 @@ export function readLookbackDays(configText) {
 /**
  * Same four-pattern author test the Scout's gate and stale check use on `git log`,
  * kept identical so the loop cannot disagree with itself about who wrote what.
+ * The Auditor's and Demo's job `if:` spell the same four patterns as `contains()` on
+ * the PR author's login, so they only ever run on the loop's own PRs, never the
+ * owner's; tests/lib/loop-pr-agents.test.ts pins those copies to this list.
  */
+export const LOOP_AUTHOR_PATTERNS = ["claude", "github-actions", "[bot]", "anthropic"];
+
 export function isLoopAuthor(text) {
   const t = String(text ?? "").toLowerCase();
-  return t.includes("claude") || t.includes("github-actions") || t.includes("[bot]") || t.includes("anthropic");
+  return LOOP_AUTHOR_PATTERNS.some((p) => t.includes(p));
 }
 
 /** Identical to stripMarkdown in the dashboard's lib/dedup/baseline.ts. */
