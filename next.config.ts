@@ -14,6 +14,10 @@ const nextConfig: NextConfig = {
   // Don't advertise the framework to anyone scanning for version-specific bugs.
   poweredByHeader: false,
 
+  // The dev-mode "N" badge sits bottom-left, exactly over the sidebar's
+  // "Sign out" button. scripts/launch-local.sh runs `next dev`, so hide it.
+  devIndicators: false,
+
   /**
    * Baseline security headers for EVERY response, including the ones the proxy
    * never sees: `_next/static/*` and `favicon.ico` are excluded by the proxy's
