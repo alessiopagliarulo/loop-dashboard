@@ -660,16 +660,16 @@ describe("the Scout's verify step", () => {
   const steps = Object.values(scout.jobs).find((j) => j.steps.some((s) => s.id === "inflight"))!.steps;
   const verify = steps.find((s) => s.name === "Verify Scout filed something or said why not")!;
 
-  /** Runs the step with `gh` answering `issues` and the agent's transcript as `transcript`. */
-  function runVerify(issues: string, transcript?: unknown) {
+  /** Runs the step as Actions does (`bash -e`) with `gh` answering `issues` (null: `gh` fails) and the agent's transcript. */
+  function runVerify(issues: string | null, transcript?: unknown) {
     const dir = mkdtempSync(join(tmpdir(), "loop-verify-"));
     const bin = join(dir, "bin");
     mkdirSync(bin);
-    writeFileSync(join(bin, "gh"), `#!/usr/bin/env bash\nprintf '%s' '${issues}'\n`);
+    writeFileSync(join(bin, "gh"), issues === null ? "#!/usr/bin/env bash\nexit 1\n" : `#!/usr/bin/env bash\nprintf '%s' '${issues}'\n`);
     chmodSync(join(bin, "gh"), 0o755);
     const exec = join(dir, "execution.json");
     if (transcript !== undefined) writeFileSync(exec, JSON.stringify(transcript));
-    const res = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", verify.run!], {
+    const res = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", verify.run!], {
       cwd: dir,
       encoding: "utf8",
       env: {
@@ -698,9 +698,13 @@ describe("the Scout's verify step", () => {
     );
   });
 
-  it("the prompt tells the agent the exact stand-down line the step reads", () => {
+  it("the stand-down line the prompt asks for, once filled in, is accepted by the step", () => {
     const prompt = String(steps.find((s) => s.id === "agent")!.with?.prompt);
-    expect(prompt).toContain("SCOUT RESULT: nothing filed - <one plain-English sentence saying why>");
+    const template = prompt.split("\n").map((l) => l.trim()).find((l) => l.startsWith("SCOUT RESULT:"))!;
+    const line = template.replace(/<[^>]*>/, "nothing passed the evidence floor");
+    const r = runVerify("[]", said(`Done.\n${line}`));
+    expect(r.status).toBe(0);
+    expect(r.out).toContain("said why: nothing passed the evidence floor");
   });
 
   it("passes when the Scout filed a proposal", () => {
@@ -722,6 +726,8 @@ describe("the Scout's verify step", () => {
   });
 
   it("fails when the proposals could not be counted", () => {
-    expect(runVerify("not json", said("SCOUT RESULT: nothing filed - x")).status).not.toBe(0);
+    const r = runVerify(null, said("SCOUT RESULT: nothing filed - x"));
+    expect(r.status).toBe(1);
+    expect(r.out).toContain("::error::Could not count the proposals");
   });
 });
