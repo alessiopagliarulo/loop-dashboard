@@ -101,6 +101,15 @@ npm run build    # standalone production build
 
 `DASHBOARD_PASSWORD` can be anything long and random. `GITHUB_TOKEN` is a fine-grained PAT — not required to log in, but every page reads live GitHub data, so the dashboard is empty without one; `.env.example` lists the exact repository permissions, including the two that are easy to miss and fail confusingly when absent. Mac-only launcher features stay off unless `LOOP_DASHBOARD_LOCAL_MODE=1`, so a cloud deployment cannot expose them by accident.
 
+### One-command launch on a Mac
+
+```bash
+scripts/launch-local.sh        # start (or reuse) the dashboard with real data and open it
+scripts/launch-local.sh stop   # stop it
+```
+
+It installs dependencies only when `package-lock.json` changed, runs `next dev` on `http://localhost:3000` (so it always serves the code in the folder right now), and opens the browser. Running it again while it is up just opens the browser. Anything `.env.local` sets wins; what it lacks is filled in memory only, never on disk: `GITHUB_TOKEN` from `gh auth token`, and a one-run password that the script prints. The public demo is forced off, so the page asks for the password and then shows live data.
+
 The ML pipeline, the LangGraph triage CLI, and the container build are in [`docs/running-locally.md`](docs/running-locally.md).
 
 ## Worth reading, if you are sampling rather than reading
