@@ -168,17 +168,20 @@ describe("the loop's PR agents run on loop PRs only", () => {
     });
   }
 
-  it("uses exactly the in-flight detector's definition of the loop's identity", () => {
-    const expected = LOOP_AUTHOR_PATTERNS.map((p) => `contains(github.event.pull_request.user.login, '${p}')`);
+  it("agrees with the in-flight detector's definition of the loop's identity", () => {
+    const logins = [
+      ...LOOP_AUTHOR_PATTERNS.map((p) => `x-${p}-x`),
+      "claude[bot]",
+      "github-actions[bot]",
+      "dependabot[bot]",
+      "anthropic-bot",
+      "alessiopagliarulo",
+      "octocat",
+    ];
     for (const file of PR_AGENTS) {
-      for (const job of Object.values(load(file).jobs)) {
-        const used = job.if?.match(/contains\(github\.event\.pull_request\.user\.login, '[^']*'\)/g) ?? [];
-        expect(used, file).toEqual(expected);
+      for (const login of logins) {
+        expect(runs(file, prEvent("claude/x", login)), `${file} ${login}`).toBe(isLoopAuthor(login));
       }
-    }
-    // And the guard agrees with isLoopAuthor on every login it could meet.
-    for (const login of ["claude[bot]", "github-actions[bot]", "dependabot[bot]", "anthropic-bot", "alessiopagliarulo", "octocat"]) {
-      expect(runs("claude-audit.yml", prEvent("claude/x", login)), login).toBe(isLoopAuthor(login));
     }
   });
 
@@ -191,8 +194,10 @@ describe("the loop's PR agents run on loop PRs only", () => {
   });
 
   it("leaves the plain CI checks on every PR", () => {
-    const tests = load("repo-tests.yml");
-    expect("pull_request" in tests.on).toBe(true);
-    for (const job of Object.values(tests.jobs)) expect(job.if ?? "").not.toContain("claude/");
+    expect("pull_request" in load("repo-tests.yml").on).toBe(true);
+    expect(runs("repo-tests.yml", prEvent("fm/ld-loop-pr-only", "alessiopagliarulo"))).toBe(true);
+    expect(runs("repo-tests.yml", prEvent("fix-typo", "alessiopagliarulo"))).toBe(true);
+    expect(runs("repo-tests.yml", prEvent("claude/issue-12-csv-export", "claude[bot]"))).toBe(true);
+    expect(runs("repo-tests.yml", prEvent("claude/issue-1", "claude[bot]", "stranger/shop"))).toBe(true);
   });
 });
