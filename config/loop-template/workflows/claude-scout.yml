@@ -25,6 +25,15 @@ name: Claude — Scout (finds work worth doing)
 #                "staleCheck": { "enabled": false, "intervalHours": 24 } } }
 # Every field is optional; a repo without the block behaves exactly as before.
 #
+# WORK IN FLIGHT: before the agent boots, `scripts/loop-inflight.mjs` gathers every open
+# PR (drafts included), every branch pushed in the last `inFlight.lookbackDays` days
+# (default 14) that has no PR yet, what merged in that window, and every idea already
+# filed or closed. The Scout reads that and never proposes what it already covers.
+# After filing, the same script flags any new proposal that existing work covers anyway
+# (label `covered` + a comment linking the covering PR/branch/idea) — see the steps
+# around the agent. The owner's habit that makes this work: push local work early,
+# ideally as a draft PR, so the loop can see it.
+#
 # SECOND JOB IN THIS FILE: `stale-check` reconciles the APPROVED queue against the
 # code that has actually landed since each approval, and flags what may have been
 # overtaken. It is opt-in, off by default, and it only ever adds a `stale` label and
@@ -432,6 +441,37 @@ jobs:
             echo "GITEOF"
           } >> "$GITHUB_OUTPUT"
 
+      # ── Work in flight ──────────────────────────────────────────────────────────
+      # The owner works on this repo outside the loop too — Claude Code on their own
+      # machine, a branch, a draft PR. None of that is an issue, so the lists above never
+      # show it, and the Scout kept proposing things that were already half-built on a
+      # branch or merged last week. This gathers it all (read-only) for the prompt.
+      # Best-effort by design: a repo that does not have the script yet, or a gh hiccup,
+      # gives the Scout a note saying so — never a red run.
+      - name: Collect work in flight
+        id: inflight
+        if: steps.gate.outputs.go == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          file="$RUNNER_TEMP/inflight.json"
+          digest=""
+          if [ -f scripts/loop-inflight.mjs ]; then
+            node scripts/loop-inflight.mjs collect --out "$file" || true
+            [ -f "$file" ] && digest=$(node scripts/loop-inflight.mjs digest --in "$file" 2>/dev/null || true)
+          else
+            echo "::warning::scripts/loop-inflight.mjs is not installed in this repo, so the Scout cannot see open branches, draft PRs or recent merges. Install it from the dashboard's loop template (config/loop-template/files/loop-inflight.mjs)."
+          fi
+          if [ -z "$digest" ]; then
+            digest="(Not available this run. Before proposing anything, look for yourself: gh pr list --state open, gh pr list --state merged --limit 30, and the repository's recently pushed branches.)"
+          fi
+          echo "$digest"
+          {
+            echo "digest<<INFLIGHTEOF"
+            echo "$digest"
+            echo "INFLIGHTEOF"
+          } >> "$GITHUB_OUTPUT"
+
       - if: steps.gate.outputs.go == 'true' && steps.ai.outputs.use_bedrock != 'true'
         uses: anthropics/claude-code-action@v1
         with:
@@ -545,6 +585,13 @@ jobs:
                ${{ steps.gate.outputs.redraft_ideas }}
                <<<END-UNTRUSTED-DATA>>>
 
+               And the fullest picture of all — everything in flight or recently landed,
+               including work the owner does by hand outside this loop:
+
+               <<<BEGIN-UNTRUSTED-DATA: work in flight and recently landed>>>
+               ${{ steps.inflight.outputs.digest }}
+               <<<END-UNTRUSTED-DATA>>>
+
                How to use each list:
                - OPEN PULL REQUESTS and APPROVED IDEAS: already in flight. Never propose
                  something they already cover.
@@ -563,10 +610,23 @@ jobs:
                  rules above apply), and mention in your final message which declined issues
                  you checked.
                - REDRAFTED IDEAS: alive and being reworked. They are in flight, NOT gaps.
+               - WORK IN FLIGHT AND RECENTLY LANDED: the owner builds things by hand too —
+                 in Claude Code on their own machine — and pushes them as branches and draft
+                 PRs. **A draft PR or a recently pushed branch is the owner's work in
+                 progress: never propose it, never propose the next slice of it, never
+                 propose a competing version of it.** Where a branch's name, commit line or
+                 changed files are anywhere near your idea, read what it does before you go
+                 on: `gh api repos/${{ github.repository }}/compare/<default>...<branch>` or
+                 `gh pr view <n>`. Anything merged in the window is shipped — check the code,
+                 not just the title. Closed and declined ideas are answered questions.
+                 If a candidate is covered by anything in this list, DROP it. Do not file it
+                 "for the record". In your final message, name each candidate you dropped
+                 and the link to what covered it.
 
                Your proposals must be genuinely NEW work not represented anywhere in: open
-               proposals, open PRs, approved ideas, declined ideas, redrafts, **or the code
-               that is already shipped on `main`**.
+               proposals, open PRs (drafts included), recently pushed branches, recent merges,
+               approved ideas, closed or declined ideas, redrafts, **or the code that is
+               already shipped on `main`**.
 
                That last one is the one this loop kept getting wrong. Every other item in that
                list is an issue or a PR, so clearing all five only proves that nobody has
@@ -648,6 +708,34 @@ jobs:
           show_full_output: true
           claude_args: *scout_claude_args
           prompt: *scout_prompt
+
+      # ── Backstop: flag anything filed that existing work already covers ──────────
+      # The prompt tells the Scout to drop covered ideas; this checks that it did, with
+      # the dashboard's own duplicate detector (same model, same text recipe, same
+      # calibrated threshold) plus any PR, branch or commit that names the idea. A
+      # covered proposal gets the `covered` label and a comment linking what covers it.
+      # It is never closed — the owner declines it in one tap. Nothing here can fail the
+      # run: the script always exits 0, and this step is continue-on-error besides.
+      - name: Flag new proposals that existing work already covers
+        if: success() && steps.gate.outputs.go == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HIGH_WATER: ${{ steps.gate.outputs.high_water }}
+        run: |
+          file="$RUNNER_TEMP/inflight.json"
+          if [ ! -f scripts/loop-inflight.mjs ] || [ ! -f "$file" ]; then
+            echo "No in-flight snapshot this run — skipping the coverage check."
+            exit 0
+          fi
+          new=$(gh issue list --state open --label proposal --limit 200 --json number \
+            | jq -r --argjson hw "$HIGH_WATER" '[.[] | select(.number > $hw) | .number] | join(",")' 2>/dev/null || true)
+          if [ -z "$new" ]; then
+            echo "This run filed nothing to check."
+            exit 0
+          fi
+          LOOP_EMBED_DIR="$RUNNER_TEMP/loop-embed" \
+            node scripts/loop-inflight.mjs check --in "$file" --issues "$new" --mode new || true
 
       # A green tick does not mean the task succeeded. Prove it.
       #

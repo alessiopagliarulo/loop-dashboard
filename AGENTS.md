@@ -37,6 +37,10 @@ The five default roles (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-
 
 Single-context: `CONTEXT.md` at the root; decisions in `docs/design-decisions.md`. See `docs/agents/domain.md`.
 
+## Loop template
+
+`config/loop-template/` is what gets installed into target repos; its scripts and workflows run there with no access to this codebase. Where they share a contract with `lib/` (labels, comment markers, the dedup threshold), a test pins the two copies together - e.g. `tests/lib/loop-inflight.test.ts`. Change both sides in one commit, and never let a template step fail a scheduled run (see `DASHBOARD-CONTRACT.md` §8).
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

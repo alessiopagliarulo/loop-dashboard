@@ -12,6 +12,7 @@ import {
   ExternalLink,
   AlertTriangle,
   Check,
+  Link2,
 } from "lucide-react";
 import type { IdeaSummary, ThreadComment } from "@/lib/queues";
 import type { DuplicateReport } from "@/lib/dedup/queue-duplicates";
@@ -22,7 +23,7 @@ import IdeaChat from "./idea-chat";
 import { useIdeaChat } from "./use-idea-chat";
 import { useToast } from "./toast";
 
-type ActionKind = "approve" | "unapprove" | "redraft" | "decline" | "unstale";
+type ActionKind = "approve" | "unapprove" | "redraft" | "decline" | "unstale" | "uncover";
 
 /**
  * The warning the Scout's stale check leaves on an approved idea whose code has
@@ -32,6 +33,12 @@ type ActionKind = "approve" | "unapprove" | "redraft" | "decline" | "unstale";
  * Octokit, which has no business in the browser bundle.
  */
 const STALE_LABEL = "stale";
+
+/**
+ * The loop's "existing work already does this" flag. A literal for the same reason
+ * as STALE_LABEL; the canonical one is `COVERED_LABEL` in lib/idea-coverage.ts.
+ */
+const COVERED_LABEL = "covered";
 
 /**
  * The chip reads as the idea's CURRENT state, so a closed issue may never wear
@@ -119,6 +126,9 @@ export default function IdeaCard({
   // approved", and warning someone that a decision they already made might be
   // out of date is noise, not information.
   const isStale = isApproved && idea.labels.includes(STALE_LABEL);
+  // Same rule: only a live idea can be "already covered". Closed ones are decided.
+  const isCovered = idea.state === "open" && idea.labels.includes(COVERED_LABEL);
+  const coverLinks = idea.coveredBy ?? [];
 
   async function loadComments() {
     if (comments || loadingComments) return;
@@ -190,6 +200,13 @@ export default function IdeaCard({
     }
   }
 
+  async function dismissCovered() {
+    if (await act("uncover")) {
+      toast.success("Cleared. The loop won't flag this one as covered again.");
+      onChanged();
+    }
+  }
+
   async function unapprove() {
     if (await act("unapprove")) {
       toast.success("Moved back to “Waiting for you”.");
@@ -255,6 +272,12 @@ export default function IdeaCard({
                 May be out of date
               </span>
             )}
+            {isCovered && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-300">
+                <Link2 className="h-3 w-3" />
+                Already covered
+              </span>
+            )}
             <span className="text-xs text-zinc-500">#{idea.number}</span>
           </div>
           <p className="mt-1.5 font-medium leading-snug text-zinc-100">
@@ -277,6 +300,42 @@ export default function IdeaCard({
           (a link cannot live inside one) and outside the `open` branch, so the
           owner sees it without expanding the card. Absent whenever there is no
           index — never an error state. */}
+      {/* What already covers it — a PR, a branch, a merge, another idea — as links,
+          outside the header button for the same reason as the duplicate strip. */}
+      {isCovered && (
+        <div className="border-t border-violet-500/20 bg-violet-500/[0.06] px-4 py-3">
+          <div className="flex items-center gap-1.5">
+            <Link2 className="h-3.5 w-3.5 text-violet-300" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-violet-300">
+              Already covered by
+            </span>
+          </div>
+          {coverLinks.length > 0 ? (
+            <ul className="mt-2 space-y-1.5">
+              {coverLinks.map((link) => (
+                <li key={link.url}>
+                  <a
+                    href={link.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="group -mx-1.5 flex items-start gap-2 rounded-lg px-1.5 py-1 transition hover:bg-violet-500/10"
+                  >
+                    <span className="min-w-0 flex-1 break-words text-sm leading-snug text-zinc-300 group-hover:text-zinc-100">
+                      {link.text}
+                    </span>
+                    <ExternalLink className="mt-1 h-3 w-3 shrink-0 text-zinc-600 group-hover:text-violet-300" />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1.5 text-sm text-zinc-400">
+              The loop&apos;s note on GitHub says what — open the card to read it.
+            </p>
+          )}
+        </div>
+      )}
+
       {duplicates && (
         <DuplicateStrip
           matches={duplicates.pairs[String(idea.number)] ?? []}
@@ -325,6 +384,31 @@ export default function IdeaCard({
                 >
                   {busy === "unstale" ? <Spinner /> : <Check className="h-4 w-4" />}
                   It&apos;s still fine — clear this
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isCovered && (
+            <div className="mb-4 rounded-xl border border-violet-700 bg-violet-950/40 p-4">
+              <p className="flex items-center gap-2 text-sm font-semibold text-violet-200">
+                <Link2 className="h-4 w-4 shrink-0" />
+                Work that already exists seems to do this.
+              </p>
+              <p className="mt-1 text-sm text-violet-300/90">
+                The loop found an open or merged PR, a pushed branch, or another idea that
+                covers it, and linked it above. It is a flag, not a verdict: nothing was
+                closed, and the Builder skips this idea while the flag is on. Decline it
+                if it really is covered, or clear the flag to keep it.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={dismissCovered}
+                  disabled={busy !== null}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-medium text-zinc-200 transition hover:bg-zinc-800 disabled:opacity-50"
+                >
+                  {busy === "uncover" ? <Spinner /> : <Check className="h-4 w-4" />}
+                  Not covered — keep it
                 </button>
               </div>
             </div>

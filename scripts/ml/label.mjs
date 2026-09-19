@@ -100,7 +100,6 @@ const rows = sourceRows.map((r) => {
     notes: prior && prior.notes ? prior.notes : r.notes ?? "",
   };
 });
-const byKey = new Map(rows.map((r) => [key(r), r]));
 
 /* ------------------------------------------------------------------ */
 /* Persistence — rewrite the whole file, atomically, after every answer */
@@ -154,7 +153,6 @@ let queue = order.filter((i) => !hasValidLabel(rows[i]));
 let pos = 0;
 
 const history = []; // stack of { idx, prevLabel, prevNotes } for 'u'
-let skippedCount = 0;
 
 function counts() {
   const c = { duplicate: 0, related: 0, unrelated: 0 };
@@ -374,7 +372,6 @@ function handleKey(ch) {
   }
 
   if (ch === "s" || ch === "S") {
-    skippedCount += 1;
     const idx = queue.splice(pos, 1)[0];
     queue.push(idx); // revisit after everything else in this session
     promptNext();

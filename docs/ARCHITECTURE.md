@@ -266,10 +266,13 @@ contract"* (`DASHBOARD-CONTRACT.md` §2).
 | `approved` | `1D76DB` | **dashboard only** | **dashboard only** — no agent ever removes it | `claude-builder.yml` |
 | `redraft` | `D93F0B` | **dashboard only** (posts the owner's feedback as a comment *first*, then labels) | **the Redraft agent itself** | `claude-redraft.yml` |
 | `declined` | `6E7781` | **dashboard only**, plus `closeIssue(..., "not_planned")` | dashboard only | **nothing** — a read-only signal consumed by Scout, Retro and `loop-metrics.mjs` |
+| `stale` | `FBCA04` | the Scout's opt-in `stale-check` job | dashboard (`unstale`, or any decision) | **nothing** — a warning on top of `approved` |
+| `covered` | `5319E7` | Scout, Redraft and Builder via `scripts/loop-inflight.mjs check`, or the agent itself | dashboard (`uncover`, or any decision) | **nothing** — the Builder skips it; `DASHBOARD-CONTRACT.md` §8 |
 
 **Movement is deliberately asymmetric.** Every forward transition is a human decision written
-by the dashboard. The only label write any agent performs is Redraft's flip back to `proposal`.
-Builder, Auditor, Demo, Retro, Metrics, @mention and Tool-installer touch **no labels at all** —
+by the dashboard. The only queue-label write any agent performs is Redraft's flip back to
+`proposal`; the warnings `stale` and `covered` are added by the loop but only ever cleared by
+the owner. Auditor, Demo, Retro, Metrics, @mention and Tool-installer touch **no labels at all** —
 past the approval gate, state lives in PR shape instead (`claude/` prefix, draft flag,
 `Closes #N`, open/merged/closed).
 
@@ -333,8 +336,9 @@ silently disappears from the map) and adds a `genericMeta()` node for any other
 `claude-*.yml`. `repo-tests.yml` fails that regex, so it is never a baseline agent and never a
 generic one: **installed on every project, rendered on no map.**
 
-Onboarding writes **18 paths** in total: the 10 workflows, 4 template files
-(`.mcp.json`, `docs/DASHBOARD-CONTRACT.md`, `docs/loop-brief.md`, `scripts/loop-metrics.mjs` —
+Onboarding writes **19 paths** in total: the 10 workflows, 5 template files
+(`.mcp.json`, `docs/DASHBOARD-CONTRACT.md`, `docs/loop-brief.md`, `scripts/loop-metrics.mjs`,
+`scripts/loop-inflight.mjs` —
 onboarding hard-fails 409 if any is missing), and 4 generated in code (`LEARNINGS.md`,
 `metrics/loop-metrics.json` = `"[]\n"`, `.github/loop-config.json`, `CLAUDE.md`). Files the
 target repo already has on `main` are skipped; the rest go in **one** `atomicCommit`.
@@ -751,7 +755,7 @@ on the open side too and folds those into Closed.
 Two more, unmitigated: `pauseLoop()` disables N workflows sequentially *then* records state, so
 a mid-loop failure leaves workflows off with no record (and `recordPauseState` swallows its own
 errors) — after which Resume cannot distinguish a paused workflow from a deliberately-off one.
-`onboardRepo()` commits 18 files, then creates 4 labels, then registers the project; a failure
+`onboardRepo()` commits 19 files, then creates 6 labels, then registers the project; a failure
 at the last step leaves the target repo fully installed but invisible to the dashboard.
 
 **No concurrent-write safety, and it is inconsistent per call site.** Only three of seven

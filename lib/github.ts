@@ -168,6 +168,15 @@ export const LOOP_LABELS: Record<string, { color: string; description: string }>
     description:
       "Approved before code landed that may have overtaken it — the owner decides",
   },
+  // Also a warning, not a state: existing work (the owner's own PR or branch, a
+  // recent merge, another idea) already seems to do this. Set by the loop's
+  // workflows through config/loop-template/files/loop-inflight.mjs, which pins the
+  // same colour and description (tests/lib/loop-inflight.test.ts checks).
+  covered: {
+    color: "5319E7",
+    description:
+      "Existing work (a PR, branch, commit or idea) already seems to cover this — the owner decides",
+  },
 };
 
 /** Default colors for labels this app may need to create on the fly. */
