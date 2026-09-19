@@ -473,6 +473,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - if: steps.gate.outputs.go == 'true' && steps.ai.outputs.use_bedrock != 'true'
+        id: agent
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -692,6 +693,14 @@ jobs:
             this hour, file NOTHING and say so. Filing filler to look productive is the exact
             failure mode that kills this system.
 
+            IF YOU FILE NOTHING, the LAST line of your final message must be exactly:
+                SCOUT RESULT: nothing filed - <one plain-English sentence saying why>
+            for example "every candidate was already covered by open or recent work" or
+            "nothing passed the evidence floor". The step after you reads that line: with it,
+            a run that filed nothing is a legitimate stand-down and stays green; without it,
+            filing nothing is treated as a malfunction and the run fails. Never write that
+            line if you did file an issue.
+
       # BEDROCK MODE — opt-in only, see docs/bedrock-setup.md and the "Resolve AI provider"
       # step above for why the Scout defaults away from this path.
       - name: Configure AWS credentials (OIDC) for Bedrock
@@ -702,6 +711,7 @@ jobs:
           aws-region: ${{ steps.ai.outputs.region }}
 
       - if: steps.gate.outputs.go == 'true' && steps.ai.outputs.use_bedrock == 'true'
+        id: agent_bedrock
         uses: anthropics/claude-code-action@v1
         with:
           use_bedrock: "true"
@@ -776,20 +786,50 @@ jobs:
       # thinking removes the `proposal` label, so a before/after count could fall even on
       # a perfect run. Issue numbers only ever go up — count the proposals numbered above
       # the high-water mark we recorded before the agent started.
-      - name: Verify Scout actually filed something
+      #
+      # Filing nothing is a legitimate outcome now that the Scout drops every candidate
+      # existing work already covers, so zero alone is not a failure. The agent must say
+      # why in a `SCOUT RESULT: nothing filed - <reason>` line (read from its final
+      # message in the action's execution file); that reason is logged and the run stays
+      # green. Zero issues AND no stated reason is the real malfunction this step exists
+      # for — an agent that backgrounded its researchers and ended its turn — and fails.
+      # The other stand-downs never reach here: no token skips the whole job, and a full
+      # pool or stale queue sets go=false in the gate.
+      - name: Verify Scout filed something or said why not
         if: success() && steps.gate.outputs.go == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HIGH_WATER: ${{ steps.gate.outputs.high_water }}
+          EXECUTION_FILE: ${{ steps.agent.outputs.execution_file || steps.agent_bedrock.outputs.execution_file }}
         run: |
           filed=$(gh issue list --state open --label proposal --limit 200 --json number \
             | jq --argjson hw "$HIGH_WATER" '[.[] | select(.number > $hw)] | length')
+          case "$filed" in ''|*[!0-9]*)
+            echo "::error::Could not count the proposals filed by this run (GitHub query failed), so the Scout's output cannot be verified."
+            exit 1 ;;
+          esac
           echo "Proposals numbered above #$HIGH_WATER (i.e. filed by this run): $filed"
-          if [ "$filed" -le 0 ]; then
-            echo "::error::Scout filed ZERO issues. The run is being failed on purpose — a green tick that produced nothing is worse than a red one, because it looks like the loop is working when it is not. Read the agent's final message in the log above: the usual causes are that it backgrounded its researchers and ended its turn instead of blocking on them, or that every candidate it found failed the evidence floor (in which case the log will say so and this failure is expected)."
-            exit 1
+          if [ "$filed" -gt 0 ]; then
+            echo "Scout filed $filed new proposal(s)."
+            exit 0
           fi
-          echo "Scout filed $filed new proposal(s)."
+
+          # Only the agent's own words count: the final result, then its assistant text.
+          # The prompt is not searched, so the example line in it can never match.
+          reason=""
+          if [ -n "$EXECUTION_FILE" ] && [ -f "$EXECUTION_FILE" ]; then
+            reason=$(jq -r '
+                [ .[]? | select(.type == "result") | .result? // empty ],
+                [ .[]? | select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text ]
+                | .[]' "$EXECUTION_FILE" 2>/dev/null \
+              | grep -o 'SCOUT RESULT: nothing filed - .*' | tail -n 1 || true)
+          fi
+          if [ -n "$reason" ]; then
+            echo "::notice::Scout filed nothing this run and said why: ${reason#SCOUT RESULT: nothing filed - }"
+            exit 0
+          fi
+          echo "::error::Scout filed ZERO issues and gave no reason (no 'SCOUT RESULT: nothing filed - ...' line in its final message). The run is being failed on purpose — a green tick that produced nothing is worse than a red one, because it looks like the loop is working when it is not. Read the agent's final message in the log above: the usual cause is that it backgrounded its researchers and ended its turn instead of blocking on them."
+          exit 1
 
   # ────────────────────────────────────────────────────────────────────────────
   # STALE-APPROVAL RECONCILIATION — opt-in, off by default
