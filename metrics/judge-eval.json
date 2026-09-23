@@ -1,0 +1,269 @@
+{
+  "generated_by": "scripts/judge/evaluate.mjs",
+  "bootstrap": {
+    "reps": 2000,
+    "seed": 20260923,
+    "interval": "95% percentile"
+  },
+  "what_is_measured": "How often the proposal judge's call (approve / not now) matches the owner's own call on the same Scout proposal, made before any code was written for it.",
+  "golden_set": {
+    "proposals_file": "data/judge/proposals.jsonl",
+    "proposals": 52,
+    "repo": "alessiopagliarulo/content-generation-platform",
+    "filed_between": [
+      "2026-07-14T15:07:48Z",
+      "2026-07-23T18:24:38Z"
+    ],
+    "label_files": [
+      "data/judge/labels-github.jsonl",
+      "data/judge/labels-hand.jsonl"
+    ],
+    "labels": "every label in this golden set is human-made; a label of any other provenance stops the run",
+    "note": "This is not data/gold-pairs-llm.jsonl. That file is a duplicate-detection set with LLM-assigned labels and is not used here."
+  },
+  "judge": {
+    "verdicts_file": "data/judge/verdicts/sonnet-prompt-v1.jsonl",
+    "answered": 52,
+    "model_requested": [
+      "sonnet"
+    ],
+    "model_resolved": [
+      "claude-sonnet-5"
+    ],
+    "prompt_version": [
+      "1"
+    ],
+    "prompt_sha256": [
+      "4e41397ab7355e7622330f31dcfe4af366d8e10d2b5176171eca320802ecb3be"
+    ],
+    "prompt_matches_template": true,
+    "template_prompt_version": "1",
+    "cli": [
+      "2.1.280 (Claude Code)"
+    ],
+    "judged_between": [
+      "2026-09-23T18:33:38.365Z",
+      "2026-09-23T18:36:51.469Z"
+    ],
+    "verdict_matches_probability": 1,
+    "list_price_usd_total": 0.7
+  },
+  "label_sets": {
+    "github-record": {
+      "label_provenance": "human",
+      "label_source": "github-record",
+      "description": "The owner's own recorded GitHub actions on each Scout proposal (approve label, merge of a build, decline label), read by scripts/judge/snapshot.mjs from data/judge/github-events.jsonl and pull-requests.jsonl. Made by the owner's account, not assigned by an LLM.",
+      "label_kinds": {
+        "merged-build": 9,
+        "approved": 20,
+        "passed-over": 23
+      },
+      "unambiguous_labels": 29,
+      "ambiguous_labels": 23,
+      "explicit_rejections_in_record": 0,
+      "unjudged": [],
+      "slices": {
+        "all_recorded_calls": {
+          "definition": "Every labelled proposal. Proposals the owner passed over (never approved, built or declined) are counted as his 'not now'. That is an assumption: he never said no to any of them.",
+          "n": 52,
+          "owner_approvals": 29,
+          "owner_not_now": 23,
+          "one_class": null,
+          "confusion": {
+            "n": 52,
+            "both_approve": 19,
+            "both_not_now": 13,
+            "judge_approve_owner_not_now": 10,
+            "judge_not_now_owner_approve": 10
+          },
+          "agreement": 0.615,
+          "agreement_count": "32/52",
+          "agreement_wilson_95ci": [
+            0.48,
+            0.735
+          ],
+          "agreement_bootstrap_95ci": [
+            0.481,
+            0.75
+          ],
+          "cohen_kappa": 0.22,
+          "cohen_kappa_bootstrap_95ci": [
+            -0.048,
+            0.477
+          ],
+          "kappa_valid_resamples": 2000,
+          "majority_baseline": {
+            "call": "approve",
+            "agreement": 0.558
+          },
+          "judge_approve_rate": 0.558,
+          "held_owner_approvals": "10/29",
+          "roc_auc_p_approve": 0.658
+        },
+        "explicit_calls_only": {
+          "definition": "Only the owner's explicit acts: approve label, merged build, decline label. This repo's record has no explicit rejections, so every row here is an approval and the figure is how often the judge agrees with an approval (its approve rate on them). It cannot measure two-sided agreement, and kappa is undefined.",
+          "n": 29,
+          "owner_approvals": 29,
+          "owner_not_now": 0,
+          "one_class": "approve",
+          "confusion": {
+            "n": 29,
+            "both_approve": 19,
+            "both_not_now": 0,
+            "judge_approve_owner_not_now": 0,
+            "judge_not_now_owner_approve": 10
+          },
+          "agreement": 0.655,
+          "agreement_count": "19/29",
+          "agreement_wilson_95ci": [
+            0.473,
+            0.801
+          ],
+          "agreement_bootstrap_95ci": [
+            0.483,
+            0.828
+          ],
+          "cohen_kappa": null,
+          "cohen_kappa_bootstrap_95ci": null,
+          "kappa_valid_resamples": null,
+          "majority_baseline": {
+            "call": "approve",
+            "agreement": 1
+          },
+          "judge_approve_rate": 0.655,
+          "held_owner_approvals": "10/29",
+          "roc_auc_p_approve": null
+        },
+        "passed_over_only": {
+          "definition": "Only proposals the owner passed over. The figure is how often the judge also said 'not now' to them.",
+          "n": 23,
+          "owner_approvals": 0,
+          "owner_not_now": 23,
+          "one_class": "not-now",
+          "confusion": {
+            "n": 23,
+            "both_approve": 0,
+            "both_not_now": 13,
+            "judge_approve_owner_not_now": 10,
+            "judge_not_now_owner_approve": 0
+          },
+          "agreement": 0.565,
+          "agreement_count": "13/23",
+          "agreement_wilson_95ci": [
+            0.368,
+            0.744
+          ],
+          "agreement_bootstrap_95ci": [
+            0.348,
+            0.783
+          ],
+          "cohen_kappa": null,
+          "cohen_kappa_bootstrap_95ci": null,
+          "kappa_valid_resamples": null,
+          "majority_baseline": {
+            "call": "not-now",
+            "agreement": 1
+          },
+          "judge_approve_rate": 0.435,
+          "held_owner_approvals": null,
+          "roc_auc_p_approve": null
+        },
+        "same_period": {
+          "filed_on_or_after": "2026-07-20T14:21:41Z",
+          "definition": "Proposals filed on or after the first passed-over one, so the approvals compared with the passed-over proposals come from the same weeks and the same triage.",
+          "n": 29,
+          "owner_approvals": 6,
+          "owner_not_now": 23,
+          "one_class": null,
+          "confusion": {
+            "n": 29,
+            "both_approve": 3,
+            "both_not_now": 13,
+            "judge_approve_owner_not_now": 10,
+            "judge_not_now_owner_approve": 3
+          },
+          "agreement": 0.552,
+          "agreement_count": "16/29",
+          "agreement_wilson_95ci": [
+            0.375,
+            0.716
+          ],
+          "agreement_bootstrap_95ci": [
+            0.379,
+            0.724
+          ],
+          "cohen_kappa": 0.046,
+          "cohen_kappa_bootstrap_95ci": [
+            -0.267,
+            0.372
+          ],
+          "kappa_valid_resamples": 2000,
+          "majority_baseline": {
+            "call": "not-now",
+            "agreement": 0.793
+          },
+          "judge_approve_rate": 0.448,
+          "held_owner_approvals": "3/6",
+          "roc_auc_p_approve": 0.554
+        }
+      },
+      "reliance_on_passed_over": {
+        "agreements_total": 32,
+        "agreements_on_passed_over": 13,
+        "share_of_agreement_from_passed_over": 0.406,
+        "reading": "How much of all_recorded_calls.agreement comes from counting passed-over proposals as 'not now'. If the owner would in fact have approved some of them, each one the judge held turns from an agreement into a disagreement."
+      },
+      "agreement_by_label_kind": {
+        "merged-build": {
+          "n": 9,
+          "owner_call": "approve",
+          "judge_agreed": 8,
+          "judge_agreement": 0.889
+        },
+        "approved": {
+          "n": 20,
+          "owner_call": "approve",
+          "judge_agreed": 11,
+          "judge_agreement": 0.55
+        },
+        "passed-over": {
+          "n": 23,
+          "owner_call": "not-now",
+          "judge_agreed": 13,
+          "judge_agreement": 0.565
+        }
+      },
+      "scout_bar_met_rate": {
+        "owner_approve": {
+          "n": 29,
+          "plain_title": 0.966,
+          "what_and_why": 1,
+          "quoted_evidence": 0.31,
+          "checked_not_built": 0.552,
+          "effort_estimate": 0.966,
+          "success_check": 1
+        },
+        "owner_not_now": {
+          "n": 23,
+          "plain_title": 1,
+          "what_and_why": 1,
+          "quoted_evidence": 0.261,
+          "checked_not_built": 0.391,
+          "effort_estimate": 0.913,
+          "success_check": 0.957
+        }
+      }
+    },
+    "hand-label": {
+      "label_provenance": "human",
+      "label_source": "hand-label",
+      "status": "no hand labels yet",
+      "how_to_add": "node scripts/judge/label.mjs, then node scripts/judge/evaluate.mjs"
+    }
+  },
+  "not_measured_here": [
+    "The judge's effect on the agent PR merge rate. That needs the gate running in front of real builds; see metrics/merge-rate.json → post_gate.",
+    "Agreement with explicit rejections: the recorded GitHub history has none (the declined label was never used on this repo).",
+    "Whether cited code exists: the judge sees the proposal text only, as the gate does."
+  ]
+}

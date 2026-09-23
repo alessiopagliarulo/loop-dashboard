@@ -807,6 +807,37 @@ jobs:
           path: ${{ runner.temp }}/loop-embed
           key: ${{ steps.embedkey.outputs.key }}
 
+      # ── Proposal judge: predict the owner's call on each new proposal (opt-in) ──
+      # Off unless .github/loop-config.json sets { "judge": { "enabled": true } }; the
+      # script checks that itself and does nothing when it is off. When on, each proposal
+      # this run filed gets one comment with the judge's prediction of the owner's call
+      # and why, and a "not now" also gets the `judge-hold` label, which only stops the
+      # Builder self-picking it. Nothing is closed, and approving the idea overrides the
+      # hold. How often this judge agrees with the owner is measured in the dashboard repo
+      # (docs/judge-results.md). One model call per new proposal. Never fails the run.
+      - name: Judge new proposals (opt-in)
+        if: success() && steps.gate.outputs.go == 'true'
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HIGH_WATER: ${{ steps.gate.outputs.high_water }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_CODE_USE_BEDROCK: ${{ steps.ai.outputs.use_bedrock == 'true' && '1' || '' }}
+          AWS_REGION: ${{ steps.ai.outputs.region }}
+        run: |
+          if [ ! -f scripts/loop-judge.mjs ]; then
+            echo "scripts/loop-judge.mjs is not installed in this repo, so there is no proposal judge."
+            exit 0
+          fi
+          new=$(gh issue list --state open --label proposal --limit 200 --json number \
+            | jq -r --argjson hw "$HIGH_WATER" '[.[] | select(.number > $hw) | .number] | join(",")' 2>/dev/null || true)
+          if [ -z "$new" ]; then
+            echo "This run filed nothing to judge."
+            exit 0
+          fi
+          node scripts/loop-judge.mjs check --issues "$new" || true
+
       # A green tick does not mean the task succeeded. Prove it.
       #
       # Counts are not proof: an approve/reject/redraft landing while the agent was

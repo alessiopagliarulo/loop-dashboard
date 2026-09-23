@@ -41,6 +41,17 @@ Single-context: `CONTEXT.md` at the root; decisions in `docs/design-decisions.md
 
 `config/loop-template/` is what gets installed into target repos; its scripts and workflows run there with no access to this codebase. Where they share a contract with `lib/` (labels, comment markers, the dedup threshold), a test pins the two copies together - e.g. `tests/lib/loop-inflight.test.ts`. Change both sides in one commit, and never let a template step fail a scheduled run (see `DASHBOARD-CONTRACT.md` §8).
 
+## Judge eval harness
+
+`scripts/judge/` measures the proposal judge (`config/loop-template/files/loop-judge.mjs`) and the agent
+PR merge rate into `metrics/judge-eval.json` and `metrics/merge-rate.json`; `docs/judge-results.md` reads
+them. The JSON is generated, never hand-edited; every label must be human-made (a non-human label stops the run),
+and `data/gold-pairs-llm.jsonl` is not a judging set. Measure, never target: no number is tuned toward a
+goal, and the post-gate merge rate stays "not yet measured" until real gated PRs exist. Only
+`run-judge.mjs --live` spends model calls; it is already spent once (`data/judge/verdicts/`), so do not
+re-run it casually. Changing the judge prompt, schema or default model means bumping `JUDGE_PROMPT_VERSION`
+and re-measuring.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

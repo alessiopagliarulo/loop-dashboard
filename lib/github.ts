@@ -177,6 +177,15 @@ export const LOOP_LABELS: Record<string, { color: string; description: string }>
     description:
       "Existing work (a PR, branch, commit or idea) already seems to cover this — the owner decides",
   },
+  // A third warning, not a state: the opt-in proposal judge predicts the owner would not
+  // approve this as written, so the Builder will not self-pick it. Set by
+  // config/loop-template/files/loop-judge.mjs, which pins the same colour and
+  // description (tests/lib/loop-judge.test.ts checks). Any owner decision clears it.
+  "judge-hold": {
+    color: "E99695",
+    description:
+      "The proposal judge predicts the owner would not approve this as written - advisory, the owner decides",
+  },
 };
 
 /** Default colors for labels this app may need to create on the fly. */

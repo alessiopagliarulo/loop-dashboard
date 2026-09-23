@@ -61,8 +61,13 @@ type ActionBody = {
  * already covered IS the owner saying "build it anyway" / "rework it", and the loop
  * never re-flags an idea whose flag was cleared (its marker comment stays on the
  * thread, and the workflows check for it).
+ *
+ * `judge-hold` too: it is the opt-in proposal judge's prediction that the owner would
+ * not approve the idea, and approving, redrafting or declining is the owner's actual
+ * answer. The judge never re-holds the same text (its marker comment records a hash of
+ * the text it judged), and never judges an approved idea at all.
  */
-const QUEUE_LABELS = ["proposal", "approved", "redraft", "declined", "stale", "covered"] as const;
+const QUEUE_LABELS = ["proposal", "approved", "redraft", "declined", "stale", "covered", "judge-hold"] as const;
 
 /**
  * The exact label set an issue should end up with after `action`, computed
