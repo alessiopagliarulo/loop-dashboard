@@ -18,7 +18,7 @@
       "data/judge/labels-github.jsonl",
       "data/judge/labels-hand.jsonl"
     ],
-    "llm_labels": "none: every label in this golden set is human-made",
+    "labels": "every label in this golden set is human-made; a label of any other provenance stops the run",
     "note": "This is not data/gold-pairs-llm.jsonl. That file is a duplicate-detection set with LLM-assigned labels and is not used here."
   },
   "judge": {

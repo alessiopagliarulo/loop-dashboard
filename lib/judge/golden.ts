@@ -24,15 +24,14 @@
  * --------------------------------------
  * `data/gold-pairs-llm.jsonl` shows how easily an LLM-labelled set gets quoted as a
  * human-labelled one. Here every row says `label_provenance`, and the evaluation
- * refuses to pool rows of different provenance into one number. Today every label is
- * human-made; `llm` exists only so that one can never be mistaken for the other.
+ * refuses any row that is not human-made, so an LLM label can never be quoted as one.
  *
  * Pure functions only: scripts/judge/snapshot.mjs does the fetching, and the tests
  * feed these canned events. No relative imports, so the .mjs scripts can import this
  * file by path (Node strips the types).
  */
 
-export type LabelProvenance = "human" | "llm";
+export type LabelProvenance = "human";
 
 /** The judge's two answers, and the two values a golden label can take. */
 export type Verdict = "approve" | "not-now";
@@ -356,8 +355,8 @@ export function validateLabel(row: unknown, where: string): GoldenLabel {
   if (!VERDICTS.includes(r.label as Verdict)) {
     throw new Error(`${where} (${r.id}): label must be "approve" or "not-now", got ${JSON.stringify(r.label)}`);
   }
-  if (r.label_provenance !== "human" && r.label_provenance !== "llm") {
-    throw new Error(`${where} (${r.id}): label_provenance must be "human" or "llm"`);
+  if (r.label_provenance !== "human") {
+    throw new Error(`${where} (${r.id}): label_provenance must be "human", got ${JSON.stringify(r.label_provenance)}; non-human labels are refused`);
   }
   if (typeof r.unambiguous !== "boolean") throw new Error(`${where} (${r.id}): unambiguous must be true or false`);
   return r as GoldenLabel;

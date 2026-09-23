@@ -8,9 +8,9 @@
  * rewrites the same numbers.
  *
  * WHAT IT REFUSES TO DO
- *   - Pool labels of different provenance. Each label set (the GitHub record, the
- *     owner's hand labels, and LLM labels should any ever appear) is scored on its own,
- *     and every block names its provenance.
+ *   - Accept a label that is not human-made. validateLabel stops the run, naming the
+ *     file and row. Each label set (the GitHub record, the owner's hand labels) is scored
+ *     on its own, and every block names its provenance.
  *   - Fold "passed over" into a clean "no". The GitHub record has explicit approvals and
  *     no explicit rejections, so the figure that treats passed-over proposals as "not
  *     now" is reported next to the figure on the owner's explicit calls alone, with the
@@ -198,15 +198,6 @@ function main(argv) {
   const proposals = readJsonl(PROPOSALS_PATH);
   const githubLabels = loadLabels(GITHUB_LABELS_PATH);
   const handLabels = loadLabels(HAND_LABELS_PATH);
-  const all = [...githubLabels, ...handLabels];
-  const llmLabels = all.filter((l) => l.label_provenance === "llm");
-  if (llmLabels.length) {
-    // Nothing in this harness writes LLM labels. If a file ever carries one, it is kept
-    // out of every human block and reported alone rather than silently pooled.
-    console.log(`::warning::${llmLabels.length} LLM-provenance labels found; they are reported separately and never counted as human.`);
-  }
-  const humanGithub = githubLabels.filter((l) => l.label_provenance === "human");
-  const humanHand = handLabels.filter((l) => l.label_provenance === "human");
 
   const verdictsFile = pickVerdictsFile(argv);
   const verdicts = readJsonl(verdictsFile, { optional: true });
@@ -225,7 +216,7 @@ function main(argv) {
       repo: proposals[0]?.repo ?? null,
       filed_between: [proposals.map((p) => p.filed_at).sort()[0] ?? null, proposals.map((p) => p.filed_at).sort().at(-1) ?? null],
       label_files: [rel(GITHUB_LABELS_PATH), rel(HAND_LABELS_PATH)],
-      llm_labels: llmLabels.length ? `${llmLabels.length} present - reported under llm_labels only` : "none: every label in this golden set is human-made",
+      labels: "every label in this golden set is human-made; a label of any other provenance stops the run",
       note: "This is not data/gold-pairs-llm.jsonl. That file is a duplicate-detection set with LLM-assigned labels and is not used here.",
     },
     judge: verdicts.length
@@ -246,11 +237,10 @@ function main(argv) {
       : { status: "not yet run", how_to_run: "node scripts/judge/run-judge.mjs --live (spends one call per proposal)" },
     label_sets: verdicts.length
       ? {
-          "github-record": githubRecordBlock(humanGithub, verdictById),
-          "hand-label": handBlock(humanHand, humanGithub, verdictById),
+          "github-record": githubRecordBlock(githubLabels, verdictById),
+          "hand-label": handBlock(handLabels, githubLabels, verdictById),
         }
       : null,
-    ...(llmLabels.length ? { llm_labels: { label_provenance: "llm", n: llmLabels.length, warning: "Not human. Never quote an agreement against these as judge-human agreement." } } : {}),
     not_measured_here: [
       "The judge's effect on the agent PR merge rate. That needs the gate running in front of real builds; see metrics/merge-rate.json → post_gate.",
       "Agreement with explicit rejections: the recorded GitHub history has none (the declined label was never used on this repo).",

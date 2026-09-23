@@ -157,6 +157,7 @@ describe("hand labels and validation", () => {
     expect(validateLabel(good, "x")).toBe(good);
     expect(() => validateLabel({ ...good, label: "yes" }, "row 3")).toThrow(/row 3/);
     expect(() => validateLabel({ ...good, label_provenance: undefined }, "x")).toThrow(/provenance/);
+    expect(() => validateLabel({ ...good, label_provenance: "llm" }, "labels.jsonl row 7")).toThrow(/labels\.jsonl row 7.*non-human labels are refused/);
     expect(() => validateLabel({ ...good, unambiguous: undefined }, "x")).toThrow(/unambiguous/);
   });
 });
