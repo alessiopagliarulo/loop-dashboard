@@ -22,6 +22,7 @@ import {
 import { getLoopConfig } from "@/lib/loop-config";
 import { AGENTS } from "@/lib/map-agents";
 import {
+  modelNamedByWorkflow,
   resolveAgentModel,
   workflowReadsModelPick,
   type AgentModels,
@@ -153,8 +154,7 @@ function parseModel(
     if (!agentId || models === null) return null;
     return resolveAgentModel(models, agentId).model;
   }
-  const m = yaml.match(/--model\s+([A-Za-z0-9._-]+)/);
-  return m ? m[1] : null;
+  return modelNamedByWorkflow(yaml);
 }
 
 /** MCP server names referenced by the workflow (--mcp-config path or inline). */

@@ -18,15 +18,13 @@ import {
 import type { AgentDetail } from "@/lib/map-types";
 import type { LoopConfig } from "@/lib/loop-config";
 import {
-  ALL_AGENTS_KEY,
   DEFAULT_AGENT_MODEL,
-  LOOP_MODELS_PATH,
   MODEL_CHOICES,
   isModelChoice,
   modelLabel,
+  modelNamedByWorkflow,
   resolveAgentModel,
   workflowReadsModelPick,
-  type AgentModels,
 } from "@/lib/loop-models";
 import { relativeTime, duration, runTone } from "./format";
 import { InlineDiff } from "./diff";
@@ -699,37 +697,22 @@ function InstallToolsTab({ detail, project }: { detail: AgentDetail; project: st
 /* Model                                                               */
 /* ------------------------------------------------------------------ */
 
-/** The two keys this tab edits, as stored (`null` = not picked). */
-type ModelPicks = { agent: string | null; all: string | null };
-
-function picksOf(models: AgentModels | undefined, agentId: string): ModelPicks {
-  return { agent: models?.[agentId] ?? null, all: models?.[ALL_AGENTS_KEY] ?? null };
-}
-
-/** Where a picked model comes from, in the owner's words. */
-const SOURCE_TEXT = {
-  agent: "picked for this agent",
-  all: "the loop default for all agents",
-  default: "the built-in default",
-} as const;
-
 /**
- * Pick the Claude model this agent runs on, plus the loop default every agent
- * without its own pick falls back to. Writes `.github/loop-config.json` ->
- * `models` through /api/loop-config, the same owner-only route as every other
- * loop setting (a signed-out demo visitor's save is refused by the proxy).
+ * Pick the Claude model this agent runs on. Writes `.github/loop-config.json`
+ * -> `models.<agent>` through /api/loop-config, the same owner-only route as
+ * every other loop setting (a signed-out demo visitor's save is refused by the
+ * proxy).
  *
  * The workflow is what honours a pick, so the tab says so plainly when this
- * project's copy of it can't: a workflow from before the picker, or a repo
- * without the list of allowed models.
+ * project's copy of it can't: a workflow from before the picker names its
+ * model outright until it is updated from the loop template.
  */
 function ModelTab({ detail, project }: { detail: AgentDetail; project: string }) {
   const { meta } = detail;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [saved, setSaved] = useState<ModelPicks | null>(null);
-  const [draft, setDraft] = useState<ModelPicks | null>(null);
-  const [models, setModels] = useState<AgentModels | undefined>(undefined);
+  const [saved, setSaved] = useState<string | null | undefined>(undefined);
+  const [draft, setDraft] = useState<string | null>(null);
   const [fingerprint, setFingerprint] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -738,10 +721,9 @@ function ModelTab({ detail, project }: { detail: AgentDetail; project: string })
 
   const apply = useCallback(
     (config: LoopConfig, fp: unknown) => {
-      const picks = picksOf(config.models, meta.id);
-      setModels(config.models);
-      setSaved(picks);
-      setDraft(picks);
+      const pick = config.models?.[meta.id] ?? null;
+      setSaved(pick);
+      setDraft(pick);
       setFingerprint(typeof fp === "string" ? fp : null);
     },
     [meta.id],
@@ -778,38 +760,28 @@ function ModelTab({ detail, project }: { detail: AgentDetail; project: string })
       </Banner>
     );
   }
-  if (loading && !draft) {
+  if (loading && saved === undefined) {
     return (
       <div className="flex items-center gap-2 py-6 text-sm text-zinc-500">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading…
       </div>
     );
   }
-  if (loadError || !draft || !saved) {
+  if (loadError || saved === undefined) {
     return <ErrorBox message={loadError ?? "Couldn't load the model settings."} onRetry={load} />;
   }
 
-  const current = draft;
-  const dirty = current.agent !== saved.agent || current.all !== saved.all;
-  const draftModels: AgentModels = {};
-  if (current.agent) draftModels[meta.id] = current.agent;
-  if (current.all) draftModels[ALL_AGENTS_KEY] = current.all;
-  const effective = resolveAgentModel(draftModels, meta.id);
-  const allOnly = resolveAgentModel(
-    current.all ? { [ALL_AGENTS_KEY]: current.all } : {},
-    meta.id,
-  );
+  const dirty = draft !== saved;
   const workflowReady = !detail.fileFound || workflowReadsModelPick(detail.rawYaml);
+  const ignoredPick = saved !== null && !isModelChoice(saved) ? saved : null;
+  // What will really run: a workflow that names its model outright ignores any pick.
+  const named = workflowReady ? null : modelNamedByWorkflow(detail.rawYaml);
+  const effective = workflowReady
+    ? resolveAgentModel(draft ? { [meta.id]: draft } : {}, meta.id)
+    : null;
+  const runsOn = effective ? effective.model : (named ?? DEFAULT_AGENT_MODEL);
 
-  /** Only the keys that changed, so a save never rewrites what it didn't touch. */
-  function patchFor(base: ModelPicks): Record<string, string | null> {
-    const patch: Record<string, string | null> = {};
-    if (current.agent !== base.agent) patch[meta.id] = current.agent;
-    if (current.all !== base.all) patch[ALL_AGENTS_KEY] = current.all;
-    return patch;
-  }
-
-  async function save(base: ModelPicks, fp: string | null, retried = false): Promise<void> {
+  async function save(fp: string | null, retried = false): Promise<void> {
     setSaving(true);
     setSaveError(null);
     setNotice(null);
@@ -819,23 +791,21 @@ function ModelTab({ detail, project }: { detail: AgentDetail; project: string })
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          models: patchFor(base),
+          models: { [meta.id]: draft },
           ...(fp ? { expectedFingerprint: fp } : {}),
         }),
       });
       const payload = await res.json().catch(() => ({}));
       if (res.status === 409 && payload?.config) {
-        const server = picksOf((payload.config as LoopConfig).models, meta.id);
-        setModels((payload.config as LoopConfig).models);
+        const server = (payload.config as LoopConfig).models?.[meta.id] ?? null;
+        const serverFp = typeof payload.fingerprint === "string" ? payload.fingerprint : null;
         // Someone saved a different setting (the Scout brief, a cap) in the
-        // meantime. Neither key this tab writes moved, so save again once.
-        if (!retried && server.agent === base.agent && server.all === base.all) {
-          return await save(base, typeof payload.fingerprint === "string" ? payload.fingerprint : null, true);
-        }
+        // meantime. This agent's key didn't move, so save again once.
+        if (!retried && server === saved) return await save(serverFp, true);
         // A real clash: keep the owner's choice, rebase what it is compared to.
         setSaved(server);
-        setFingerprint(typeof payload.fingerprint === "string" ? payload.fingerprint : null);
-        setNotice("The model settings changed somewhere else. Your choice is still here - check it and save again.");
+        setFingerprint(serverFp);
+        setNotice("The model setting changed somewhere else. Your choice is still here - check it and save again.");
         return;
       }
       if (!res.ok) throw new Error(payload.error ?? "Couldn't save.");
@@ -848,19 +818,23 @@ function ModelTab({ detail, project }: { detail: AgentDetail; project: string })
     }
   }
 
-  const ignored = resolveAgentModel(models, meta.id).ignored.filter(
-    (i) => i.key === meta.id || i.key === ALL_AGENTS_KEY,
-  );
-
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 text-sm">
         <Cpu className="h-4 w-4 shrink-0 text-emerald-400" />
         <span className="text-zinc-300">
           {meta.label} runs on{" "}
-          <span className="font-semibold text-zinc-100">{modelLabel(effective.model)}</span>
+          <span className="font-semibold text-zinc-100">{modelLabel(runsOn)}</span>
         </span>
-        <span className="text-xs text-zinc-500">({SOURCE_TEXT[effective.source]})</span>
+        <span className="text-xs text-zinc-500">
+          (
+          {!effective
+            ? "set in its workflow file"
+            : effective.source === "agent"
+              ? "picked for this agent"
+              : "the built-in default"}
+          )
+        </span>
       </div>
 
       {detail.fileFound && !workflowReady && (
@@ -870,95 +844,61 @@ function ModelTab({ detail, project }: { detail: AgentDetail; project: string })
           &quot;Compared with the template&quot; view shows the difference).
         </Banner>
       )}
-      {detail.modelsListInstalled === false && (
+      {ignoredPick && (
         <Banner tone="amber">
-          This project has no {LOOP_MODELS_PATH}, the list of models the workflows accept, so every
-          pick is ignored and each agent stays on {modelLabel(DEFAULT_AGENT_MODEL)}. Add it from the
-          loop template&apos;s starting files.
+          The loop config sets this agent&apos;s model to &quot;{ignoredPick}&quot;, which isn&apos;t a
+          model the workflows accept, so it is ignored. Pick a model below to replace it.
         </Banner>
       )}
-      {ignored.map((i) => (
-        <Banner key={i.key} tone="amber">
-          The loop config sets {i.key === ALL_AGENTS_KEY ? "the all-agents model" : "this agent's model"} to
-          &quot;{i.value}&quot;, which isn&apos;t a model the workflows accept, so it is ignored. Pick a
-          model below to replace it.
-        </Banner>
-      ))}
 
       <section>
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          This agent
-        </h3>
         <p className="mb-2 text-xs text-zinc-500">
           Applies from the {meta.label}&apos;s next run. Nothing runs when you save.
         </p>
         <div className="space-y-1.5" role="radiogroup" aria-label={`${meta.label} model`}>
           <ModelOption
             name={`model-${meta.id}`}
-            checked={current.agent === null}
-            onSelect={() => setDraft({ ...current, agent: null })}
-            title="Loop default"
-            blurb={`Follows the setting for all agents below - currently ${modelLabel(allOnly.model)}.`}
+            checked={draft === null}
+            onSelect={() => setDraft(null)}
+            title="Default"
+            blurb={`Runs on ${modelLabel(DEFAULT_AGENT_MODEL)}, what every agent ran on before this setting existed.`}
           />
           {MODEL_CHOICES.map((c) => (
             <ModelOption
               key={c.id}
               name={`model-${meta.id}`}
-              checked={current.agent === c.id}
-              onSelect={() => setDraft({ ...current, agent: c.id })}
+              checked={draft === c.id}
+              onSelect={() => setDraft(c.id)}
               title={c.label}
               blurb={c.blurb}
             />
           ))}
-          {current.agent !== null && !isModelChoice(current.agent) && (
+          {draft !== null && !isModelChoice(draft) && (
             <ModelOption
               name={`model-${meta.id}`}
               checked
               onSelect={() => undefined}
-              title={`"${current.agent}"`}
+              title={`"${draft}"`}
               blurb="Not a model the workflows accept - ignored. Pick another option to replace it."
             />
           )}
         </div>
       </section>
 
-      <section>
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          All agents
-        </h3>
-        <label htmlFor="model-all" className="mb-2 block text-xs text-zinc-500">
-          What every agent without its own pick runs on.
-        </label>
-        <select
-          id="model-all"
-          value={current.all ?? ""}
-          onChange={(e) => setDraft({ ...current, all: e.target.value || null })}
-          className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-emerald-500/50 sm:w-72"
-        >
-          <option value="">Built-in default ({modelLabel(DEFAULT_AGENT_MODEL)})</option>
-          {MODEL_CHOICES.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.label}
-            </option>
-          ))}
-          {current.all !== null && !isModelChoice(current.all) && (
-            <option value={current.all}>&quot;{current.all}&quot; (ignored)</option>
-          )}
-        </select>
-      </section>
-
       {notice && <Banner tone="amber">{notice}</Banner>}
       {saveError && <Banner tone="red">{saveError}</Banner>}
       {justSaved && !dirty && (
-        <Banner tone="emerald">
-          Saved. The {meta.label} runs on {modelLabel(effective.model)} from its next run.
+        <Banner tone={workflowReady ? "emerald" : "amber"}>
+          {workflowReady
+            ? `Saved. The ${meta.label} runs on ${modelLabel(runsOn)} from its next run.`
+            : `Saved, but not used yet: the ${meta.label} keeps running on ${modelLabel(runsOn)} until its workflow is updated from the loop template.`}
         </Banner>
       )}
 
       <button
         disabled={saving || !dirty}
-        onClick={() => save(saved, fingerprint)}
-        title={!dirty ? "Nothing to save - the model settings haven't changed." : undefined}
+        onClick={() => save(fingerprint)}
+        title={!dirty ? "Nothing to save - the model setting hasn't changed." : undefined}
         className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-3.5 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

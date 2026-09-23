@@ -9,8 +9,7 @@
  *   config/loop-template/workflows/  — the .github/workflows/*.yml agents
  *   config/loop-template/files/      — every OTHER baseline file (.mcp.json,
  *                                      DASHBOARD-CONTRACT.md, loop-brief.md,
- *                                      loop-metrics.mjs, loop-inflight.mjs,
- *                                      loop-models.json).
+ *                                      loop-metrics.mjs, loop-inflight.mjs).
  *                                      Flat filenames; where each one installs
  *                                      in a target repo is declared by
  *                                      TEMPLATE_FILE_TARGETS.
@@ -53,8 +52,6 @@ export const TEMPLATE_FILE_TARGETS: Record<string, string> = {
   "loop-brief.md": "docs/loop-brief.md",
   "loop-metrics.mjs": "scripts/loop-metrics.mjs",
   "loop-inflight.mjs": "scripts/loop-inflight.mjs",
-  // The models an agent may be switched to - see lib/loop-models.ts.
-  "loop-models.json": ".github/loop-models.json",
 };
 
 const PILOT_REPO: RepoConfig = { owner: PILOT_PROJECT.owner, repo: PILOT_PROJECT.repo };

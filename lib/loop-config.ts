@@ -9,7 +9,7 @@
 
 import { createHash } from "node:crypto";
 import { getFileWithSha, commitFile, type RepoConfig } from "./github";
-import { MODEL_CHOICES, MODEL_KEYS, isModelChoice, type AgentModels } from "./loop-models";
+import { MODEL_AGENT_IDS, MODEL_CHOICES, isModelChoice, type AgentModels } from "./loop-models";
 
 export const LOOP_CONFIG_PATH = ".github/loop-config.json";
 
@@ -84,8 +84,8 @@ export type LoopConfig = {
    */
   demoPort?: number;
   /**
-   * The model each agent runs on, keyed by Process Map agent id plus "all" -
-   * see lib/loop-models.ts. Absent means every agent runs on the default, and
+   * The model each agent runs on, keyed by Process Map agent id - see
+   * lib/loop-models.ts. Absent means every agent runs on the default, and
    * a key only ever appears once the owner has picked something, so an
    * untouched repo's file never gains it.
    *
@@ -555,9 +555,9 @@ function mergeModels(
   }
   const next: AgentModels = { ...(current ?? {}) };
   for (const [key, value] of Object.entries(patch)) {
-    if (!MODEL_KEYS.includes(key)) {
+    if (!MODEL_AGENT_IDS.includes(key)) {
       throw new LoopConfigError(
-        `models.${key} isn't an agent whose model can be picked. Valid keys: ${MODEL_KEYS.join(", ")}.`,
+        `models.${key} isn't an agent whose model can be picked. Valid keys: ${MODEL_AGENT_IDS.join(", ")}.`,
       );
     }
     if (value === null) {

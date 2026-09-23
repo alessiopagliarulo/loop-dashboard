@@ -1,13 +1,14 @@
 /**
  * The per-agent model picker, end to end without a live run.
  *
- * Three things have to agree for a pick on the Process Map to change what an
+ * Two things have to agree for a pick on the Process Map to change what an
  * agent runs on: the dashboard writes `models.<agent>` into
- * `.github/loop-config.json`, the target repo holds the list of allowed models
- * (`.github/loop-models.json`, installed from the same file the dashboard
- * imports), and each agent workflow's "Resolve AI model" step turns the two
- * into `--model`. These tests pin all three together, and run the workflow step
- * itself against fixture repos so "never a red run" is exercised, not assumed.
+ * `.github/loop-config.json`, and each agent workflow's "Resolve AI model" step
+ * turns that into `--model`. The step carries its own list of accepted models
+ * (as the `aiProvider` step does), so these tests run the real step, for every
+ * workflow, against every model the dashboard offers - that is what keeps the
+ * two lists together - and against hostile and malformed configs so "never a
+ * red run" is exercised, not assumed.
  */
 
 import { spawnSync } from "node:child_process";
@@ -34,22 +35,17 @@ import {
   setLoopConfig,
 } from "../../lib/loop-config";
 import {
-  ALL_AGENTS_KEY,
   DEFAULT_AGENT_MODEL,
-  LOOP_MODELS_PATH,
   MODEL_AGENT_IDS,
   MODEL_CHOICES,
-  MODEL_KEYS,
+  modelNamedByWorkflow,
   resolveAgentModel,
   workflowReadsModelPick,
 } from "../../lib/loop-models";
-import { TEMPLATE_FILE_TARGETS } from "../../lib/loop-template";
 import { AGENTS } from "../../lib/map-agents";
-import { TARGET_AGENTS } from "../../lib/tools";
 
 const ROOT = join(__dirname, "..", "..");
 const WORKFLOWS_DIR = join(ROOT, "config/loop-template/workflows");
-const CATALOG = readFileSync(join(ROOT, "config/loop-template/files/loop-models.json"), "utf8");
 
 type Step = { name?: string; id?: string; uses?: string; env?: Record<string, string>; run?: string; with?: Record<string, string> };
 type Job = { steps?: Step[] };
@@ -86,35 +82,21 @@ describe("the list of models", () => {
       expect(c.blurb.trim()).not.toBe("");
     }
   });
-
-  it("is installed into every new project where the workflows read it", () => {
-    expect(TEMPLATE_FILE_TARGETS["loop-models.json"]).toBe(LOOP_MODELS_PATH);
-    for (const a of pickerAgents) expect(modelStep(a.file).run).toContain(LOOP_MODELS_PATH);
-  });
-
-  it("appears in no workflow: they check a pick against the installed file instead", () => {
-    for (const a of pickerAgents) {
-      const run = modelStep(a.file).run!;
-      for (const c of MODEL_CHOICES.filter((c) => c.id !== DEFAULT_AGENT_MODEL)) {
-        expect(run).not.toMatch(new RegExp(`\\b${c.id}\\b`));
-      }
-    }
-  });
 });
 
 describe("the agents a model can be picked for", () => {
-  it("are the Process Map's Claude agents, keyed by their map id, plus the Tools section's 'all'", () => {
-    expect(MODEL_KEYS).toEqual([ALL_AGENTS_KEY, ...MODEL_AGENT_IDS]);
-    expect(TARGET_AGENTS.map((t) => t.value)).toContain(ALL_AGENTS_KEY);
-    for (const t of TARGET_AGENTS) expect(MODEL_KEYS).toContain(t.value);
+  it("are the Process Map's Claude agents, keyed by their map id", () => {
+    expect(MODEL_AGENT_IDS).toEqual(pickerAgents.map((a) => a.id));
+    expect(MODEL_AGENT_IDS).not.toContain("metrics");
   });
 
-  it("covers every template workflow that runs Claude, and only those", () => {
+  it("are exactly the template workflows that run the Claude agent action", () => {
     const runsClaude = readdirSync(WORKFLOWS_DIR).filter((f) =>
-      readFileSync(join(WORKFLOWS_DIR, f), "utf8").includes("anthropics/claude-code-action"),
+      Object.values(jobsOf(f)).some((j) =>
+        j.steps?.some((s) => s.uses?.startsWith("anthropics/claude-code-action")),
+      ),
     );
     expect(pickerAgents.map((a) => a.file).sort()).toEqual(runsClaude.sort());
-    expect(AGENTS.find((a) => a.id === "metrics")?.modelPicker).toBeFalsy();
   });
 
   it.each(pickerAgents.map((a) => [a.file, a.id]))("%s resolves its own key (%s)", (file, id) => {
@@ -144,15 +126,6 @@ describe("each agent workflow", () => {
     expect(steps[at]).not.toHaveProperty("if");
     expect(workflowReadsModelPick(readFileSync(join(WORKFLOWS_DIR, file), "utf8"))).toBe(true);
   });
-
-  it.each(pickerAgents.map((a) => [a.file]))("%s falls back to the default the list names", (file) => {
-    expect(modelStep(file).run).toMatch(new RegExp(`^model=${DEFAULT_AGENT_MODEL}$`, "m"));
-  });
-
-  it("the resolve step is the same script in every workflow", () => {
-    const scripts = new Set(pickerAgents.map((a) => modelStep(a.file).run));
-    expect(scripts.size).toBe(1);
-  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -161,15 +134,13 @@ describe("each agent workflow", () => {
 
 /**
  * Runs the "Resolve AI model" step the way Actions does (`bash -e`) in a repo
- * holding `config` as .github/loop-config.json and `catalog` as
- * .github/loop-models.json (`null` = no such file).
+ * holding `config` as .github/loop-config.json (`null` = no such file).
  */
-function runModelStep(file: string, config: string | null, catalog: string | null = CATALOG) {
+function runModelStep(file: string, config: string | null) {
   const step = modelStep(file);
   const dir = mkdtempSync(join(tmpdir(), "loop-model-"));
   mkdirSync(join(dir, ".github"));
   if (config !== null) writeFileSync(join(dir, ".github/loop-config.json"), config);
-  if (catalog !== null) writeFileSync(join(dir, LOOP_MODELS_PATH), catalog);
   const outputs = join(dir, "github-output");
   writeFileSync(outputs, "");
   const res = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", step.run!], {
@@ -182,38 +153,34 @@ function runModelStep(file: string, config: string | null, catalog: string | nul
 
 const cfg = (models: unknown) => JSON.stringify({ prCap: 3, models });
 
-const SCENARIOS: { name: string; config: string | null; catalog?: string | null; builder: string; warns: boolean }[] = [
+const SCENARIOS: { name: string; config: string | null; builder: string; warns: boolean }[] = [
   { name: "no loop-config.json", config: null, builder: "opus", warns: false },
   { name: "a config with no models key", config: JSON.stringify({ prCap: 3 }), builder: "opus", warns: false },
   { name: "a config that is not JSON", config: "{ nope", builder: "opus", warns: false },
   { name: "models that is not an object", config: cfg("sonnet"), builder: "opus", warns: false },
   { name: "models that is an array", config: cfg(["sonnet"]), builder: "opus", warns: false },
   { name: "a pick for this agent", config: cfg({ builder: "sonnet" }), builder: "sonnet", warns: false },
-  { name: "a pick for all agents", config: cfg({ all: "haiku" }), builder: "haiku", warns: false },
-  { name: "this agent's pick over all", config: cfg({ all: "haiku", builder: "sonnet" }), builder: "sonnet", warns: false },
   { name: "another agent's pick", config: cfg({ audit: "haiku" }), builder: "opus", warns: false },
+  { name: "a key nothing reads", config: cfg({ all: "haiku" }), builder: "opus", warns: false },
   { name: "a non-string pick", config: cfg({ builder: 7 }), builder: "opus", warns: false },
   { name: "an empty pick", config: cfg({ builder: "" }), builder: "opus", warns: false },
   { name: "a model not on the list", config: cfg({ builder: "gpt-5" }), builder: "opus", warns: true },
-  { name: "an unlisted pick, then a good all", config: cfg({ builder: "gpt-5", all: "sonnet" }), builder: "sonnet", warns: true },
+  { name: "a differently cased model", config: cfg({ builder: "Sonnet" }), builder: "opus", warns: true },
   { name: "an extra flag smuggled in", config: cfg({ builder: "opus --dangerously-skip-permissions" }), builder: "opus", warns: true },
   { name: "a newline smuggled in", config: cfg({ builder: "sonnet\nmodel=haiku" }), builder: "opus", warns: true },
-  { name: "no list of models in the repo", config: cfg({ builder: "sonnet" }), catalog: null, builder: "opus", warns: true },
-  { name: "a list that is not JSON", config: cfg({ builder: "sonnet" }), catalog: "[oops", builder: "opus", warns: true },
-  { name: "a list of the wrong shape", config: cfg({ builder: "sonnet" }), catalog: JSON.stringify(["sonnet"]), builder: "opus", warns: true },
 ];
 
 describe("the Resolve AI model step", () => {
   it.each(SCENARIOS.map((s) => [s.name, s]))("with %s it exits 0 and picks the right model", (_n, s) => {
-    const res = runModelStep("claude-builder.yml", s.config, s.catalog === undefined ? CATALOG : s.catalog);
+    const res = runModelStep("claude-builder.yml", s.config);
     expect(res.status).toBe(0);
     // Exactly one output line, so nothing smuggled in a value can add another.
     expect(res.outputs).toBe(`model=${s.builder}\n`);
     expect(res.stdout.includes("::warning::")).toBe(s.warns);
   });
 
-  it("gives the same answer the dashboard shows, when the list is installed", () => {
-    for (const s of SCENARIOS.filter((s) => s.catalog === undefined)) {
+  it("gives the same answer the dashboard shows", () => {
+    for (const s of SCENARIOS) {
       let parsed: unknown = null;
       try {
         parsed = s.config === null ? null : JSON.parse(s.config);
@@ -225,10 +192,38 @@ describe("the Resolve AI model step", () => {
     }
   });
 
-  it.each(pickerAgents.map((a) => [a.file, a.id]))("in %s honours a pick for %s", (file, id) => {
-    const res = runModelStep(file, cfg({ [id]: "haiku", all: "sonnet" }));
-    expect(res.status).toBe(0);
-    expect(res.outputs).toBe("model=haiku\n");
+  it.each(pickerAgents.flatMap((a) => MODEL_CHOICES.map((c) => [a.file, a.id, c.id])))(
+    "in %s a pick for %s of %s is honoured",
+    (file, id, model) => {
+      const res = runModelStep(file, cfg({ [id]: model }));
+      expect(res.status).toBe(0);
+      expect(res.outputs).toBe(`model=${model}\n`);
+      expect(res.stdout).not.toContain("::warning::");
+    },
+  );
+
+  it.each(pickerAgents.map((a) => [a.file, a.id]))("in %s another agent's pick or a bad one leaves the default", (file, id) => {
+    const other = pickerAgents.find((a) => a.id !== id)!.id;
+    for (const config of [null, cfg({ [other]: "haiku" }), cfg({ [id]: "gpt-5" })]) {
+      const res = runModelStep(file, config);
+      expect(res.status).toBe(0);
+      expect(res.outputs).toBe(`model=${DEFAULT_AGENT_MODEL}\n`);
+    }
+  });
+});
+
+describe("a workflow that predates the picker", () => {
+  const old = "claude_args: |\n  --model opus\n  --max-turns 80\n";
+
+  it("is told apart from one that reads the pick, and names its own model", () => {
+    expect(workflowReadsModelPick(old)).toBe(false);
+    expect(workflowReadsModelPick(null)).toBe(false);
+    expect(modelNamedByWorkflow(old)).toBe("opus");
+    expect(modelNamedByWorkflow("no model here")).toBeNull();
+    for (const a of pickerAgents) {
+      const yamlText = readFileSync(join(WORKFLOWS_DIR, a.file), "utf8");
+      expect(workflowReadsModelPick(yamlText), a.file).toBe(true);
+    }
   });
 });
 

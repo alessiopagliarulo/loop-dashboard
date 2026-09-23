@@ -138,10 +138,4 @@ export type AgentDetail = {
   historyUrl: string;
   /** True when an Anthropic API key is configured (AI drafting available). */
   aiEnabled: boolean;
-  /**
-   * Whether the repo has `.github/loop-models.json`, the list a workflow checks
-   * a model pick against - without it every pick is ignored. Unset when it
-   * wasn't checked (not a model-picker agent, or the read failed).
-   */
-  modelsListInstalled?: boolean;
 };

@@ -3,7 +3,6 @@ import { getFileContent, getWorkflowRuns } from "@/lib/github";
 import { parseCapabilities } from "@/lib/map-capabilities";
 import { extractPrompt } from "@/lib/map-yaml";
 import { aiEnabled } from "@/lib/map-ai";
-import { LOOP_MODELS_PATH } from "@/lib/loop-models";
 import { resolveProjectFromUrl, findProjectAgent, ProjectError } from "@/lib/projects";
 import type { AgentDetail, RunSummary } from "@/lib/map-types";
 
@@ -29,16 +28,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     const path = `.github/workflows/${meta.file}`;
     const ref = "main";
     const rawYaml = await getFileContent(path, ref, repo);
-    const [mcpJson, modelsListInstalled] = await Promise.all([
-      getFileContent(".mcp.json", "main", repo).catch(() => null),
-      // Only agents with a Model tab need to know; left unset when the read fails.
-      meta.modelPicker
-        ? getFileContent(LOOP_MODELS_PATH, "main", repo).then(
-            (c) => c !== null,
-            () => undefined,
-          )
-        : undefined,
-    ]);
+    const mcpJson = await getFileContent(".mcp.json", "main", repo).catch(() => null);
 
     let runs: RunSummary[] = [];
     try {
@@ -67,7 +57,6 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       editable,
       historyUrl: `https://github.com/${repo.owner}/${repo.repo}/commits/${ref}/${path}`,
       aiEnabled: aiEnabled(),
-      modelsListInstalled,
     };
     return NextResponse.json(detail);
   } catch (err) {
