@@ -31,6 +31,12 @@ export type AgentMeta = {
   dispatch: DispatchKind;
   /** True for non-baseline (custom, per-project) agents built at runtime. */
   generic?: boolean;
+  /**
+   * True when the workflow runs a Claude agent whose model the owner can pick
+   * from the Model tab. Its template workflow reads the pick from
+   * `.github/loop-config.json` -> `models.<id>` (see lib/loop-models.ts).
+   */
+  modelPicker?: boolean;
   /** Label + help text for the dispatch input, when dispatch !== "none". */
   dispatchInputLabel?: string;
   dispatchInputHelp?: string;

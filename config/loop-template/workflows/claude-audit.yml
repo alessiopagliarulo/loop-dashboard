@@ -121,6 +121,33 @@ jobs:
           echo "use_bedrock=$([ "$provider" = "bedrock" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "region=$region" >> "$GITHUB_OUTPUT"
 
+      # ── AI model: which Claude model this agent runs on ─────────────────────────
+      # Picked on the dashboard's Process Map (the agent's Model tab) and stored in
+      # .github/loop-config.json -> "models.<agent>". Only opus, sonnet and haiku are
+      # accepted (the list the dashboard offers). A missing key, malformed config or
+      # any other value falls back to opus - what this agent always ran on - with a
+      # warning, never a failed run.
+      - name: Resolve AI model
+        id: model
+        env:
+          AGENT: audit
+        run: |
+          model=opus
+          source="built-in default"
+          picked=$(jq -r --arg k "$AGENT" '.models | objects | .[$k] | strings' .github/loop-config.json 2>/dev/null || true)
+          case "$picked" in
+            opus|sonnet|haiku)
+              model=$picked
+              source="models.$AGENT in .github/loop-config.json"
+              ;;
+            "") ;;
+            *)
+              echo "::warning::Ignoring models.$AGENT in .github/loop-config.json - it is not one of opus, sonnet, haiku."
+              ;;
+          esac
+          echo "AI model: $model ($source)"
+          echo "model=$model" >> "$GITHUB_OUTPUT"
+
       - if: steps.ai.outputs.use_bedrock != 'true'
         uses: anthropics/claude-code-action@v1
         with:
@@ -131,7 +158,7 @@ jobs:
           allowed_bots: "claude"
           show_full_output: true
           claude_args: &audit_claude_args |
-            --model opus
+            --model ${{ steps.model.outputs.model || 'opus' }}
             --max-turns 60
             --allowedTools "Bash,BashOutput,KillShell,Read,Write,Edit,Glob,Grep,Task,TodoWrite,WebSearch,WebFetch"
           prompt: &audit_prompt |

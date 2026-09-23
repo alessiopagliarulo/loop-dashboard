@@ -86,7 +86,7 @@ Three facts that explain most of the design:
 `capability`), and `FALLBACK_REF = "claude/dashboard-support-workflows"`.
 
 Eight of the nine are AI agents sharing one shape: `anthropics/claude-code-action@v1`,
-`--model opus`, a `prompt: |` block bound to a YAML anchor, and a **duplicated step** gated on
+a "Resolve AI model" step feeding `--model` (`opus` unless `models.<agent>` in `loop-config.json` says otherwise; `design-decisions.md` §15), a `prompt: |` block bound to a YAML anchor, and a **duplicated step** gated on
 `steps.ai.outputs.use_bedrock == 'true'` that reuses the same anchors after
 `aws-actions/configure-aws-credentials@v4`. (Two separate steps rather than one conditional
 step is a logged decision — `design-decisions.md` §4 — because combining `use_bedrock` with
@@ -458,9 +458,9 @@ animated), `feedback` (dashed, "Learns from"), `capability` (sky, dashed).
 
 Tapping an agent opens `components/map/agent-drawer.tsx` — despite the filename it is **not a
 drawer** but a centered modal (`h-[85vh] w-[85vw]`) that **re-polls its detail route every 20 s
-while open**. Five tabs: *Overview* (triggers, capability chips, last 5 runs), *Instructions*
+while open**. Six tabs: *Overview* (triggers, capability chips, last 5 runs), *Instructions*
 (friendly prompt editor with an "Advanced: edit the full file" raw-YAML toggle, plus a
-"Draft with AI" box), *Run now* (dispatch with an optional issue/PR number), *Install tools*,
+"Draft with AI" box), *Model* (per-agent Claude model pick), *Run now* (dispatch with an optional issue/PR number), *Install tools*,
 *History*. Below the canvas sit two collapsible cards: **"Improve the loop with AI"** and
 **"Loop history"** with one-tap restore. Restore is **always a new commit** — history is never
 rewritten or force-pushed.
@@ -696,7 +696,8 @@ Tool-install blockers use a different encoding again: an open issue whose **titl
 
 `.github/loop-config.json` schema (`lib/loop-config.ts`): `autonomousBuildEnabled` (false),
 `prCap` (3 | "unlimited"), `ideaQueueCap` (25 | "unlimited"), `demoPort?` (no default — the
-workflow's `jq … // 3000` supplies it), `scout: {productSummary, currentGoals[], offLimits[],
+workflow's `jq … // 3000` supplies it), `models?` (agent id → `opus`|`sonnet`|`haiku`, merged per key
+on save; see `lib/loop-models.ts`), `scout: {productSummary, currentGoals[], offLimits[],
 lenses[], maxPerRun 1..10}`, and **`extra?: Record<string, unknown>`** which round-trips every
 unrecognised key. `extra` exists because saving from the dashboard used to **delete** any key a
 newer workflow had added.

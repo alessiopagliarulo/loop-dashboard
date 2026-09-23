@@ -301,8 +301,8 @@ templates use a single YAML anchor for each, referenced from both branches — s
 about *what* the agent is told to do changes based on where it runs; only *which
 account pays for and logs the inference* changes.
 
-The `--model opus` flag in each workflow is left as the `opus` alias, unchanged, in
-both modes — Claude Code resolves that alias correctly for whichever provider is
+The model each workflow passes (`opus` by default, or the alias picked on the dashboard's
+Model tab) is left as a Claude Code alias, unchanged, in both modes — Claude Code resolves that alias correctly for whichever provider is
 active (see "Pin model versions" at
 <https://code.claude.com/docs/en/amazon-bedrock>), so there's no separate Bedrock model
 ID hard-coded in the templates to drift out of sync with the subscription path.

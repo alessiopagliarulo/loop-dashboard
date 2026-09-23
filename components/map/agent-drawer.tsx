@@ -13,8 +13,19 @@ import {
   History,
   Info,
   Sparkles,
+  Cpu,
 } from "lucide-react";
 import type { AgentDetail } from "@/lib/map-types";
+import type { LoopConfig } from "@/lib/loop-config";
+import {
+  DEFAULT_AGENT_MODEL,
+  MODEL_CHOICES,
+  isModelChoice,
+  modelLabel,
+  modelNamedByWorkflow,
+  resolveAgentModel,
+  workflowReadsModelPick,
+} from "@/lib/loop-models";
 import { relativeTime, duration, runTone } from "./format";
 import { InlineDiff } from "./diff";
 import HistoryList from "./history-list";
@@ -22,11 +33,12 @@ import { useAiJob, formatElapsed } from "./use-ai-job";
 import Modal from "./modal";
 import CatalogBrowser from "@/components/tools/catalog-browser";
 
-type Tab = "overview" | "instructions" | "run" | "install" | "history";
+type Tab = "overview" | "instructions" | "model" | "run" | "install" | "history";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "instructions", label: "Instructions" },
+  { id: "model", label: "Model" },
   { id: "run", label: "Run now" },
   { id: "install", label: "Install tools" },
   { id: "history", label: "History" },
@@ -153,6 +165,7 @@ export default function AgentDrawer({
             {tab === "instructions" && (
               <InstructionsTab detail={detail} project={project} onSaved={load} />
             )}
+            {tab === "model" && <ModelTab detail={detail} project={project} />}
             {tab === "run" && (
               <RunTab
                 detail={detail}
@@ -677,6 +690,257 @@ function InstallToolsTab({ detail, project }: { detail: AgentDetail; project: st
         available,
       }}
     />
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Model                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Pick the Claude model this agent runs on. Writes `.github/loop-config.json`
+ * -> `models.<agent>` through /api/loop-config, the same owner-only route as
+ * every other loop setting (a signed-out demo visitor's save is refused by the
+ * proxy).
+ *
+ * The workflow is what honours a pick, so the tab says so plainly when this
+ * project's copy of it can't: a workflow from before the picker names its
+ * model outright until it is updated from the loop template.
+ */
+function ModelTab({ detail, project }: { detail: AgentDetail; project: string }) {
+  const { meta } = detail;
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null | undefined>(undefined);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [fingerprint, setFingerprint] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
+
+  const apply = useCallback(
+    (config: LoopConfig, fp: unknown) => {
+      const pick = config.models?.[meta.id] ?? null;
+      setSaved(pick);
+      setDraft(pick);
+      setFingerprint(typeof fp === "string" ? fp : null);
+    },
+    [meta.id],
+  );
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const res = await fetch(`/api/loop-config?project=${encodeURIComponent(project)}`);
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.error ?? "Couldn't load the model settings.");
+      apply(payload.config as LoopConfig, payload.fingerprint);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Couldn't load the model settings.");
+    } finally {
+      setLoading(false);
+    }
+  }, [project, apply]);
+
+  useEffect(() => {
+    if (!meta.modelPicker) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    load();
+  }, [meta.modelPicker, load]);
+
+  if (!meta.modelPicker) {
+    return (
+      <Banner tone="zinc">
+        <Info className="mr-1 inline h-3.5 w-3.5" />
+        {meta.generic
+          ? "This is a custom agent, so its model is set in its own workflow file (Instructions tab), not here."
+          : "This one runs a plain script, not a Claude agent, so there's no model to pick."}
+      </Banner>
+    );
+  }
+  if (loading && saved === undefined) {
+    return (
+      <div className="flex items-center gap-2 py-6 text-sm text-zinc-500">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+      </div>
+    );
+  }
+  if (loadError || saved === undefined) {
+    return <ErrorBox message={loadError ?? "Couldn't load the model settings."} onRetry={load} />;
+  }
+
+  const dirty = draft !== saved;
+  const workflowReady = !detail.fileFound || workflowReadsModelPick(detail.rawYaml);
+  const ignoredPick = saved !== null && !isModelChoice(saved) ? saved : null;
+  // What will really run: a workflow that names its model outright ignores any pick.
+  const named = workflowReady ? null : modelNamedByWorkflow(detail.rawYaml);
+  const effective = workflowReady
+    ? resolveAgentModel(draft ? { [meta.id]: draft } : {}, meta.id)
+    : null;
+  const runsOn = effective ? effective.model : (named ?? DEFAULT_AGENT_MODEL);
+
+  async function save(fp: string | null, retried = false): Promise<void> {
+    setSaving(true);
+    setSaveError(null);
+    setNotice(null);
+    setJustSaved(false);
+    try {
+      const res = await fetch(`/api/loop-config?project=${encodeURIComponent(project)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          models: { [meta.id]: draft },
+          ...(fp ? { expectedFingerprint: fp } : {}),
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (res.status === 409 && payload?.config) {
+        const server = (payload.config as LoopConfig).models?.[meta.id] ?? null;
+        const serverFp = typeof payload.fingerprint === "string" ? payload.fingerprint : null;
+        // Someone saved a different setting (the Scout brief, a cap) in the
+        // meantime. This agent's key didn't move, so save again once.
+        if (!retried && server === saved) return await save(serverFp, true);
+        // A real clash: keep the owner's choice, rebase what it is compared to.
+        setSaved(server);
+        setFingerprint(serverFp);
+        setNotice("The model setting changed somewhere else. Your choice is still here - check it and save again.");
+        return;
+      }
+      if (!res.ok) throw new Error(payload.error ?? "Couldn't save.");
+      apply(payload.config as LoopConfig, payload.fingerprint);
+      setJustSaved(true);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Couldn't save.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 text-sm">
+        <Cpu className="h-4 w-4 shrink-0 text-emerald-400" />
+        <span className="text-zinc-300">
+          {meta.label} runs on{" "}
+          <span className="font-semibold text-zinc-100">{modelLabel(runsOn)}</span>
+        </span>
+        <span className="text-xs text-zinc-500">
+          (
+          {!effective
+            ? "set in its workflow file"
+            : effective.source === "agent"
+              ? "picked for this agent"
+              : "the built-in default"}
+          )
+        </span>
+      </div>
+
+      {detail.fileFound && !workflowReady && (
+        <Banner tone="amber">
+          This project&apos;s {meta.file} still names its model directly, so a pick here is saved
+          but not used until that workflow is updated from the loop template (the Process Map&apos;s
+          &quot;Compared with the template&quot; view shows the difference).
+        </Banner>
+      )}
+      {ignoredPick && (
+        <Banner tone="amber">
+          The loop config sets this agent&apos;s model to &quot;{ignoredPick}&quot;, which isn&apos;t a
+          model the workflows accept, so it is ignored. Pick a model below to replace it.
+        </Banner>
+      )}
+
+      <section>
+        <p className="mb-2 text-xs text-zinc-500">
+          Applies from the {meta.label}&apos;s next run. Nothing runs when you save.
+        </p>
+        <div className="space-y-1.5" role="radiogroup" aria-label={`${meta.label} model`}>
+          <ModelOption
+            name={`model-${meta.id}`}
+            checked={draft === null}
+            onSelect={() => setDraft(null)}
+            title="Default"
+            blurb={`Runs on ${modelLabel(DEFAULT_AGENT_MODEL)}, what every agent ran on before this setting existed.`}
+          />
+          {MODEL_CHOICES.map((c) => (
+            <ModelOption
+              key={c.id}
+              name={`model-${meta.id}`}
+              checked={draft === c.id}
+              onSelect={() => setDraft(c.id)}
+              title={c.label}
+              blurb={c.blurb}
+            />
+          ))}
+          {draft !== null && !isModelChoice(draft) && (
+            <ModelOption
+              name={`model-${meta.id}`}
+              checked
+              onSelect={() => undefined}
+              title={`"${draft}"`}
+              blurb="Not a model the workflows accept - ignored. Pick another option to replace it."
+            />
+          )}
+        </div>
+      </section>
+
+      {notice && <Banner tone="amber">{notice}</Banner>}
+      {saveError && <Banner tone="red">{saveError}</Banner>}
+      {justSaved && !dirty && (
+        <Banner tone={workflowReady ? "emerald" : "amber"}>
+          {workflowReady
+            ? `Saved. The ${meta.label} runs on ${modelLabel(runsOn)} from its next run.`
+            : `Saved, but not used yet: the ${meta.label} keeps running on ${modelLabel(runsOn)} until its workflow is updated from the loop template.`}
+        </Banner>
+      )}
+
+      <button
+        disabled={saving || !dirty}
+        onClick={() => save(fingerprint)}
+        title={!dirty ? "Nothing to save - the model setting hasn't changed." : undefined}
+        className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-3.5 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+        Save
+      </button>
+    </div>
+  );
+}
+
+function ModelOption({
+  name,
+  checked,
+  onSelect,
+  title,
+  blurb,
+}: {
+  name: string;
+  checked: boolean;
+  onSelect: () => void;
+  title: string;
+  blurb: string;
+}) {
+  return (
+    <label
+      className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 transition ${
+        checked
+          ? "border-emerald-500/50 bg-emerald-500/10"
+          : "border-zinc-800 bg-zinc-900 hover:border-zinc-700"
+      }`}
+    >
+      <input
+        type="radio"
+        name={name}
+        checked={checked}
+        onChange={onSelect}
+        className="mt-0.5 accent-emerald-500"
+      />
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-zinc-100">{title}</span>
+        <span className="block text-xs leading-relaxed text-zinc-400">{blurb}</span>
+      </span>
+    </label>
   );
 }
 

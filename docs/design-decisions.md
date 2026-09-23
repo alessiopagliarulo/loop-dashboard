@@ -432,3 +432,33 @@ back to `updatedAt` then `createdAt`. The fallbacks are approximate in *known di
 approximation rather than implying precision it does not have.
 
 **When:** 2026-09-08.
+
+---
+
+## 15. Per-agent models: picked on the Process Map, validated inline in each workflow
+
+**Decided:** the owner picks each loop agent's Claude model on the Process Map's Model tab. The
+pick is stored in the target repo's `.github/loop-config.json` under `models`, keyed by Process
+Map agent id, and each agent workflow resolves it in a "Resolve AI model" step: its own key, then
+`opus`, which is what every agent ran on before. There is no loop-wide "all agents" setting; that
+is follow-up work.
+
+**Why inline:** the step validates the value with a `case` over `opus|sonnet|haiku`, the same way
+the `aiProvider` step validates its value, so no extra file is installed into target repos and a
+project that has already onboarded picks the feature up through the ordinary workflow template
+drift, with nothing else to copy over. The dashboard's list (`MODEL_CHOICES` in
+`lib/loop-models.ts`) is pinned to the workflows by `tests/lib/loop-models.test.ts`, which runs
+every workflow's step against every id on the list. Ids are Claude Code aliases, which resolve on
+both the subscription and Bedrock, so `aiProvider` and `models` stay independent.
+
+**Fail-soft rule:** a missing key, malformed JSON, or a value not on the list is skipped with a
+warning and the agent runs on `opus`. The resolve step cannot exit non-zero, and the agent step
+also carries `|| 'opus'` in case the step never ran.
+
+**Older workflows:** a project whose workflow still says `--model opus` ignores a pick. The Model
+tab detects that, says so, and shows the model the workflow actually names instead of the pick.
+
+**Not covered:** the Scout workflow's staleness check (`stale-check` job) keeps its own
+`--model sonnet`. It is a cheap second job, not the Scout agent the owner is picking for.
+
+**When:** 2026-09-23.
