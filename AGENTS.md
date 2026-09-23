@@ -45,7 +45,7 @@ Single-context: `CONTEXT.md` at the root; decisions in `docs/design-decisions.md
 
 `scripts/judge/` measures the proposal judge (`config/loop-template/files/loop-judge.mjs`) and the agent
 PR merge rate into `metrics/judge-eval.json` and `metrics/merge-rate.json`; `docs/judge-results.md` reads
-them. The JSON is generated, never hand-edited; every figure names its label provenance (human vs LLM),
+them. The JSON is generated, never hand-edited; every label must be human-made (a non-human label stops the run),
 and `data/gold-pairs-llm.jsonl` is not a judging set. Measure, never target: no number is tuned toward a
 goal, and the post-gate merge rate stays "not yet measured" until real gated PRs exist. Only
 `run-judge.mjs --live` spends model calls; it is already spent once (`data/judge/verdicts/`), so do not
