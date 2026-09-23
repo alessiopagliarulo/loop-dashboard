@@ -52,6 +52,7 @@ export const TEMPLATE_FILE_TARGETS: Record<string, string> = {
   "loop-brief.md": "docs/loop-brief.md",
   "loop-metrics.mjs": "scripts/loop-metrics.mjs",
   "loop-inflight.mjs": "scripts/loop-inflight.mjs",
+  "loop-judge.mjs": "scripts/loop-judge.mjs",
 };
 
 const PILOT_REPO: RepoConfig = { owner: PILOT_PROJECT.owner, repo: PILOT_PROJECT.repo };

@@ -442,3 +442,24 @@ jobs:
             exit 1
           fi
           echo "Labels are correct — #$ISSUE_NUMBER is back in the owner's approval queue."
+
+      # ── Proposal judge: re-judge the rewritten idea (opt-in) ──────────────────────
+      # Off unless .github/loop-config.json sets { "judge": { "enabled": true } }. The
+      # rewrite is new text, so the judge reads it again: a "not now" (re)applies the
+      # `judge-hold` label, a "likely approve" removes it. Advisory only; never fails the run.
+      - name: Judge the rewritten idea (opt-in)
+        if: success() && steps.meta.outputs.issue_number != ''
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.meta.outputs.issue_number }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_CODE_USE_BEDROCK: ${{ steps.ai.outputs.use_bedrock == 'true' && '1' || '' }}
+          AWS_REGION: ${{ steps.ai.outputs.region }}
+        run: |
+          if [ ! -f scripts/loop-judge.mjs ]; then
+            echo "scripts/loop-judge.mjs is not installed in this repo, so there is no proposal judge."
+            exit 0
+          fi
+          node scripts/loop-judge.mjs check --issues "$ISSUE_NUMBER" || true

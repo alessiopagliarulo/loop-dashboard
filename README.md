@@ -16,11 +16,13 @@ Coding agents are cheap enough now that one can file a well-argued proposal ever
 
 Nine agents run as GitHub Actions workflows in the target repository. The dashboard is where a person approves, rejects, or sends work back, and where the evidence for each decision is assembled before they look at it. It is a personal tool first: it runs against the author's own repos, on the author's own AWS account, for about **$11.50 a month**.
 
-## Four results
+## Five results
 
 **Dense embeddings beat the keyword baseline on duplicate detection — and the two encoders are indistinguishable, which is the useful finding.** Average precision 0.937 (MiniLM, local) and 0.934 (Titan V2 on Bedrock) against 0.760 for BM25, over 150 stratified pairs with 1,000-replicate bootstrap intervals. The two dense intervals overlap almost entirely, so the honest conclusion is not "Titan wins" but "keep the free local one." → [`docs/ml-results.md`](docs/ml-results.md)
 
 **A model was killed by measuring the data first.** A proposal-acceptance classifier was planned and never built: all 24 human-authored PRs merged and all 26 rejections were bot PRs, so the model would have learned "was a human involved" and reported a false ~0.95 AUC. A second confound — the queue stalled on a known date, so "not merged" mostly meant "filed after triage stopped" — killed it independently. → [`docs/ml-results.md`](docs/ml-results.md)
+
+**A pre-code proposal judge was built and measured, and the measurement is modest.** An LLM judge predicts whether the owner would approve a Scout proposal before any code is written; it is opt-in and flag-only, and it agrees with the owner's recorded calls on 32 of 52 proposals (61.5%, 95% interval 48% to 75%) against 55.8% for always saying "approve". The labels are the owner's own GitHub actions, not LLM-assigned, but 23 of the 52 are proposals he passed over rather than rejected, so that number leans on an assumption. Whether the gate raises the agent PR merge rate is not measured: no PR has been built behind it yet. → [`docs/judge-results.md`](docs/judge-results.md)
 
 **The human-in-the-loop gate is real, not decorative.** The LangGraph triage agent halts at a checkpointed `interrupt()` with `getState()` reporting `next: ["apply_decisions"]` and resumes from the checkpoint with human input. Verified over four live dry runs against eight open issues, with zero writes reaching GitHub; in one run human input changed 8 of 8 of the model's proposed actions. → [`docs/evidence/langgraph-run-2026-09-02.md`](docs/evidence/langgraph-run-2026-09-02.md)
 

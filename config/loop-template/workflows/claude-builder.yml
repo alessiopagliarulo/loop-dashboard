@@ -28,6 +28,10 @@ name: Claude — Builder (implements work, keeps your queue full)
 #     included) and recent merges, flags the covered ones with a link, and the agent is
 #     shown every recently pushed branch too. Clearing the flag (or re-approving) from
 #     the dashboard is how the owner says "build it anyway".
+#   - With autonomous build ON, it never SELF-PICKS a proposal labelled `judge-hold` -
+#     the opt-in proposal judge (`scripts/loop-judge.mjs`) predicted the owner would not
+#     approve it as written. An `approved` issue is built whatever the judge said: the
+#     owner's approval always overrides the judge.
 #
 # A cheap bash gate runs first, so a run with no room and no work costs ~15 seconds.
 # That same gate refuses to run at all until `docs/loop-brief.md` is filled in — a
@@ -197,8 +201,9 @@ jobs:
           # They stay approved (the owner decides), but they do not count as work here.
           approved=$(gh issue list --state open --label approved --limit 200 --json number,labels \
             --jq '[.[] | select((.labels | map(.name) | index("covered")) == null)] | length')
+          # A `judge-hold` proposal is not self-pickable either (the owner approving it overrides).
           proposals=$(gh issue list --state open --label proposal --limit 200 --json number,labels \
-            --jq '[.[] | select((.labels | map(.name) | index("covered")) == null)] | length')
+            --jq '[.[] | select((.labels | map(.name)) as $l | ($l | index("covered")) == null and ($l | index("judge-hold")) == null)] | length')
           case "$approved" in ''|*[!0-9]*) approved=0 ;; esac
           case "$proposals" in ''|*[!0-9]*) proposals=0 ;; esac
           covered_ideas=$(gh issue list --state open --label covered --limit 200 --json number \
@@ -206,6 +211,11 @@ jobs:
           [ -z "$covered_ideas" ] && covered_ideas="(none)"
           echo "Flagged as already covered: $covered_ideas"
           echo "covered_ideas=$covered_ideas" >> "$GITHUB_OUTPUT"
+          held_ideas=$(gh issue list --state open --label judge-hold --limit 200 --json number \
+            --jq '[.[].number | "#\(.)"] | join(", ")' 2>/dev/null || true)
+          [ -z "$held_ideas" ] && held_ideas="(none)"
+          echo "Held by the proposal judge (not self-pickable): $held_ideas"
+          echo "held_ideas=$held_ideas" >> "$GITHUB_OUTPUT"
           echo "Agent PRs awaiting you (drafts excluded): $open_prs / $CAP | approved: $approved | proposals: $proposals | autonomous: $AUTONOMOUS"
           echo "Already claimed by an open PR: $claimed"
           echo "claimed=$claimed" >> "$GITHUB_OUTPUT"
@@ -234,7 +244,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           if [ "$AUTONOMOUS" = "true" ]; then
-            pick_rule='2. If none are approved, choose the SINGLE strongest open issue labeled `proposal` — judge by value to the product against effort and risk, and prefer small. You are trusted to choose. Do not ask, do not build more than one.'
+            pick_rule='2. If none are approved, choose the SINGLE strongest open issue labeled `proposal` that is NOT labelled `judge-hold` - judge by value to the product against effort and risk, and prefer small. You are trusted to choose. Do not ask, do not build more than one.'
             nothing_to_build=$([ "$approved" -eq 0 ] && [ "$proposals" -eq 0 ] && echo true || echo false)
           else
             pick_rule='2. If none are approved, STOP without opening a PR. Autonomous build is OFF for this project — you may only build issues the owner has explicitly labeled `approved`. Do not self-pick a proposal, no matter how strong it looks, and do not comment suggesting one — the owner has chosen to review before anything gets built.'
@@ -411,6 +421,13 @@ jobs:
 
             They are OFF LIMITS too, whatever other label they carry. The owner removes the
             `covered` label if he still wants one built; until then, leave it alone.
+
+            These proposals are labelled `judge-hold` - the proposal judge predicted the owner
+            would not approve them as written:
+                ${{ steps.gate.outputs.held_ideas }}
+
+            Never pick one of them on your own. If one of them is ALSO labelled `approved`,
+            the owner has overruled the judge: build it like any other approved issue.
 
             This happened for real on 2026-07-14: two Builder runs both picked issue #15, both
             spent fourteen minutes, and produced two pull requests for one feature. The owner

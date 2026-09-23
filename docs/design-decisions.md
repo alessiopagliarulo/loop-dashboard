@@ -462,3 +462,44 @@ tab detects that, says so, and shows the model the workflow actually names inste
 `--model sonnet`. It is a cheap second job, not the Scout agent the owner is picking for.
 
 **When:** 2026-09-23.
+
+---
+
+## 16. The proposal judge predicts the owner's call, is opt-in, and only ever flags
+
+**Decided:** an LLM judge (`config/loop-template/files/loop-judge.mjs`) reads one Scout proposal
+before any code is written and predicts the owner's own call on it: approve for building, or not
+now. The golden labels are the owner's recorded calls, not a quality definition invented for the
+judge. The judge holds a proposal to the bar the Scout was already given in `claude-scout.yml` and
+to nothing else. Its answer is advice: with `judge.enabled: true` in `.github/loop-config.json` (off
+by default) it posts one comment and, on "not now", adds a `judge-hold` label. It never closes,
+declines, approves or edits anything. The Builder's autonomous self-pick skips held proposals, and
+the owner approving a held idea overrides the hold.
+
+**Why:** the loop's weak point is the owner's review time, and the Scout's own prompt says so ("a
+weak proposal ... becomes a real PR that wastes the owner's review time"). A pre-code check is the
+cheapest place to act on that. But what counts as a good proposal is the owner's call, so the judge
+is measured against that call rather than against a rubric someone else wrote, and it cannot act on
+it alone: a false "not now" that only adds a label costs a glance; one that closed the idea would
+lose work silently. This is the same flag-only shape as decision 14.
+
+**Measured, not assumed:** `scripts/judge/` runs the exact template module over recorded proposals
+and the owner's recorded calls, and commits `metrics/judge-eval.json` and `docs/judge-results.md`.
+Every agreement figure names the provenance of the labels it was computed against. The effect on
+the agent PR merge rate is a separate question the harness cannot answer by itself; it is
+instrumented (`metrics/merge-rate.json`, `post_gate`) and reads "not yet measured" until real gated
+PRs exist.
+
+**Rejected:**
+- **Auto-closing or auto-declining on "not now".** See above.
+- **A judge scored against LLM-assigned labels.** The only 150-example set in the repo
+  (`data/gold-pairs-llm.jsonl`) is a duplicate-detection set with LLM labels; scoring a judge
+  against a model's own kind of labels would measure agreement between models, not with the owner.
+- **On by default.** The owner has not yet seen the judge's calls on live proposals.
+
+**Tradeoff accepted:** the owner's record on the archived repo has explicit approvals and no
+explicit rejections, so "passed over" stands in for "not now". That assumption is the largest
+uncertainty in the measured agreement; the results doc reports the figure with and without it, and
+`scripts/judge/label.mjs` lets the owner replace it with his actual calls.
+
+**When:** 2026-09-23.
