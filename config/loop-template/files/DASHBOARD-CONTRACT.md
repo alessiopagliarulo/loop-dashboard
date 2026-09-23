@@ -195,6 +195,10 @@ the file did not exist.
   "prCap": 3,
   "ideaQueueCap": 25,
   "demoPort": 3000,
+  "models": {
+    "all": "sonnet",
+    "builder": "opus"
+  },
   "scout": {
     "productSummary": "One paragraph: what this product is and who it is for.",
     "currentGoals": ["Ship the mobile approval flow", "Cut demo capture time"],
@@ -214,6 +218,8 @@ the file did not exist.
 | `prCap`                  | `3`     | `claude-builder`   | Max **non-draft** agent PRs open at once. `"unlimited"` disables the cap. Full ⇒ the Builder stands down. |
 | `ideaQueueCap`           | `25`    | `claude-scout`     | Max open `proposal` issues. `"unlimited"` disables the cap. Full ⇒ the Scout stands down.               |
 | `demoPort`               | `3000`  | `claude-demo`      | Local port the app is booted on before the browser is driven. Must be a plain integer.                  |
+| `models.<agent>`         | unset   | that agent         | Which Claude model the agent runs on, picked on the dashboard's Process Map (Model tab). Keyed by agent: `scout`, `redraft`, `builder`, `audit`, `demo`, `retro`, `mention`, `toolinstall`. |
+| `models.all`             | unset   | every agent        | The model for every agent without its own `models.<agent>`. With neither set, an agent runs on `opus`. |
 | `scout.productSummary`   | `""`    | `claude-scout`     | Free text: what the product is. Injected into the Scout's prompt as the owner speaking directly.        |
 | `scout.currentGoals`     | `[]`    | `claude-scout`     | Array of strings. Proposals serving these win.                                                          |
 | `scout.offLimits`        | `[]`    | `claude-scout`     | Array of strings. The Scout proposes nothing in these areas, at all.                                    |
@@ -223,6 +229,11 @@ the file did not exist.
 
 The Scout gate prints one line per run saying which of these it actually loaded, or why it
 fell back to defaults — check the run log there before assuming a setting was ignored.
+
+A `models` pick is used only when it is one of the ids in `.github/loop-models.json`. Each
+agent's "Resolve AI model" step prints the model it chose and where from; a pick that is
+not on that list, or a repo without the file, is skipped with a warning and the agent runs
+on the next setting (its own pick, then `all`, then `opus`). The run never fails over it.
 
 ### `docs/loop-brief.md` vs `scout.productSummary` — which wins
 
@@ -255,6 +266,7 @@ feature: fix the brief in the same PR.
 | `.github/loop-config.json`    | Per-repo caps + autonomy switches (see above).                     |
 | `.mcp.json`                   | MCP servers available to this repo's agents (starts empty).        |
 | `scripts/loop-inflight.mjs`   | Gathers work in flight for the Scout, Redraft and Builder (§8).    |
+| `.github/loop-models.json`    | The Claude models an agent may be switched to (see §6, `models`).  |
 
 ---
 

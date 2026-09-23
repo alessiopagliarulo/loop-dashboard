@@ -9,6 +9,7 @@
 
 import { createHash } from "node:crypto";
 import { getFileWithSha, commitFile, type RepoConfig } from "./github";
+import { MODEL_CHOICES, MODEL_KEYS, isModelChoice, type AgentModels } from "./loop-models";
 
 export const LOOP_CONFIG_PATH = ".github/loop-config.json";
 
@@ -82,6 +83,17 @@ export type LoopConfig = {
    * unless the owner has explicitly typed a port.
    */
   demoPort?: number;
+  /**
+   * The model each agent runs on, keyed by Process Map agent id plus "all" -
+   * see lib/loop-models.ts. Absent means every agent runs on the default, and
+   * a key only ever appears once the owner has picked something, so an
+   * untouched repo's file never gains it.
+   *
+   * Kept as read, unknown keys and values included: the workflows ignore a
+   * value they don't recognise, and dropping it on an unrelated save would
+   * delete a setting a newer workflow may understand.
+   */
+  models?: AgentModels;
   scout: ScoutConfig;
   /**
    * Everything in the stored file that this version of the dashboard doesn't
@@ -102,6 +114,7 @@ const CANONICAL_KEYS = [
   "prCap",
   "ideaQueueCap",
   "demoPort",
+  "models",
   "scout",
 ] as const;
 
@@ -199,6 +212,21 @@ function normalizeDemoPort(value: unknown): number | undefined {
   return undefined;
 }
 
+/**
+ * Only string values survive: they are all a workflow can use, and anything
+ * else is ignored by the workflow's own `strings` filter too. Unknown keys and
+ * unknown model names are kept (see LoopConfig.models); a `models` that is not
+ * an object at all reads as "nothing picked".
+ */
+function normalizeModels(value: unknown): AgentModels | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const models: AgentModels = {};
+  for (const [key, v] of Object.entries(value)) {
+    if (typeof v === "string" && v !== "") models[key] = v;
+  }
+  return Object.keys(models).length > 0 ? models : undefined;
+}
+
 function normalizeStringList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -287,6 +315,7 @@ export function normalizeLoopConfig(value: unknown): LoopConfig {
     prCap: normalizeCap(raw.prCap, DEFAULT_LOOP_CONFIG.prCap),
     ideaQueueCap: normalizeCap(raw.ideaQueueCap, DEFAULT_LOOP_CONFIG.ideaQueueCap),
     demoPort: normalizeDemoPort(raw.demoPort),
+    models: normalizeModels(raw.models),
     scout: normalizeScout(raw.scout),
   };
   if (Object.keys(extra).length > 0) config.extra = extra;
@@ -328,6 +357,9 @@ export function serializeLoopConfig(config: LoopConfig): string {
         // Omitted entirely when unset — JSON.stringify drops undefined-
         // valued keys, so an absent demoPort round-trips as absent.
         demoPort: config.demoPort,
+        // Same omit-when-unset rule: nothing picked writes no key at all.
+        models:
+          config.models && Object.keys(config.models).length > 0 ? config.models : undefined,
         scout: {
           ...(config.scout.extra ?? {}),
           productSummary: config.scout.productSummary,
@@ -484,7 +516,9 @@ function validatePatch(next: LoopConfig): void {
   }
 }
 
-export type LoopConfigPatch = Partial<Omit<LoopConfig, "scout" | "demoPort" | "extra">> & {
+export type LoopConfigPatch = Partial<
+  Omit<LoopConfig, "scout" | "demoPort" | "models" | "extra">
+> & {
   /**
    * `extra` is stripped here for the same reason it is at the top level: it is
    * a record of what was on disk, not a settable field.
@@ -498,7 +532,46 @@ export type LoopConfigPatch = Partial<Omit<LoopConfig, "scout" | "demoPort" | "e
    * already dropped an `undefined` value from the wire.
    */
   demoPort?: number | null;
+  /**
+   * Merged key by key over what is stored, so picking one agent's model never
+   * touches another's. A model id sets that key; `null` clears it back to
+   * "not picked". Keys left out are left alone.
+   */
+  models?: Record<string, string | null>;
 };
+
+/**
+ * Apply a `models` patch. Only the keys being set are validated: a value the
+ * owner hand-edited into another key is not this save's business, and failing
+ * on it would block every unrelated save.
+ */
+function mergeModels(
+  current: AgentModels | undefined,
+  patch: unknown,
+): AgentModels | undefined {
+  if (patch === undefined) return current;
+  if (typeof patch !== "object" || patch === null || Array.isArray(patch)) {
+    throw new LoopConfigError("models must be an object of agent -> model.");
+  }
+  const next: AgentModels = { ...(current ?? {}) };
+  for (const [key, value] of Object.entries(patch)) {
+    if (!MODEL_KEYS.includes(key)) {
+      throw new LoopConfigError(
+        `models.${key} isn't an agent whose model can be picked. Valid keys: ${MODEL_KEYS.join(", ")}.`,
+      );
+    }
+    if (value === null) {
+      delete next[key];
+    } else if (isModelChoice(value)) {
+      next[key] = value;
+    } else {
+      throw new LoopConfigError(
+        `models.${key} must be one of: ${MODEL_CHOICES.map((c) => c.id).join(", ")}.`,
+      );
+    }
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
 
 /**
  * Merge `patch` over the current (or default) config, validate, and commit
@@ -529,7 +602,12 @@ export async function setLoopConfig(
   // strip it off the patch before anything is merged.
   const incoming = { ...(patch ?? {}) } as Record<string, unknown>;
   delete incoming.extra;
-  const { scout: rawScoutPatch, demoPort: demoPortPatch, ...rest } = incoming as LoopConfigPatch;
+  const {
+    scout: rawScoutPatch,
+    demoPort: demoPortPatch,
+    models: modelsPatch,
+    ...rest
+  } = incoming as LoopConfigPatch;
   // Same rule one level down: a caller cannot invent `scout.extra`, and a UI
   // that round-trips the whole scout block back to us must not be able to
   // overwrite what was really on disk with its own copy.
@@ -553,6 +631,7 @@ export async function setLoopConfig(
         : demoPortPatch === null
           ? undefined
           : demoPortPatch,
+    models: mergeModels(current.models, modelsPatch),
     scout: {
       ...current.scout,
       ...(scoutPatch ?? {}),
@@ -571,7 +650,13 @@ export async function setLoopConfig(
 
   // Trim the free text the same way a read would, so what's stored is what a
   // reload shows (and the fingerprint we hand back stays accurate).
-  next.scout = normalizeScout(next.scout);
+  // `extra` is set aside first: normalizeScout reads its input as raw file
+  // JSON, so it would file the `extra` key itself as one more unknown key and
+  // the save wrote `scout.extra.aiProvider` - which no workflow reads, so the
+  // Scout quietly left Bedrock on the next save of any setting.
+  const { extra: scoutExtra, ...scoutFields } = next.scout;
+  next.scout = normalizeScout(scoutFields);
+  if (scoutExtra) next.scout.extra = scoutExtra;
 
   try {
     await commitFile(

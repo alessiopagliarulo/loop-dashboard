@@ -1,0 +1,21 @@
+{
+  "about": "The Claude models a loop agent may run on. The dashboard's model picker offers exactly these, and every agent workflow checks a picked model against this list before using it: anything not listed here is ignored with a warning and the agent runs on `default`. Ids are Claude Code model aliases, which work on both the Claude subscription and Bedrock. See docs/DASHBOARD-CONTRACT.md section 6.",
+  "default": "opus",
+  "choices": [
+    {
+      "id": "opus",
+      "label": "Opus",
+      "blurb": "The most capable model, and what every agent ran on before this setting existed. Uses the most of your plan's usage limits."
+    },
+    {
+      "id": "sonnet",
+      "label": "Sonnet",
+      "blurb": "Fast and strong. A good fit for most coding and review work, and lighter on your usage limits."
+    },
+    {
+      "id": "haiku",
+      "label": "Haiku",
+      "blurb": "The fastest and lightest. Best for simple, well-defined jobs; noticeably weaker on hard problems."
+    }
+  ]
+}

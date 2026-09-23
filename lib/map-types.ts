@@ -31,6 +31,12 @@ export type AgentMeta = {
   dispatch: DispatchKind;
   /** True for non-baseline (custom, per-project) agents built at runtime. */
   generic?: boolean;
+  /**
+   * True when the workflow runs a Claude agent whose model the owner can pick
+   * from the Model tab. Its template workflow reads the pick from
+   * `.github/loop-config.json` -> `models.<id>` (see lib/loop-models.ts).
+   */
+  modelPicker?: boolean;
   /** Label + help text for the dispatch input, when dispatch !== "none". */
   dispatchInputLabel?: string;
   dispatchInputHelp?: string;
@@ -132,4 +138,10 @@ export type AgentDetail = {
   historyUrl: string;
   /** True when an Anthropic API key is configured (AI drafting available). */
   aiEnabled: boolean;
+  /**
+   * Whether the repo has `.github/loop-models.json`, the list a workflow checks
+   * a model pick against - without it every pick is ignored. Unset when it
+   * wasn't checked (not a model-picker agent, or the read failed).
+   */
+  modelsListInstalled?: boolean;
 };

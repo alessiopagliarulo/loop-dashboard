@@ -31,6 +31,7 @@ export const AGENTS: AgentMeta[] = [
     triggers: ["Automatically every hour", "Can be run on demand"],
     onMain: true,
     canDispatch: true,
+    modelPicker: true,
     dispatch: "none",
   },
   {
@@ -46,6 +47,7 @@ export const AGENTS: AgentMeta[] = [
     ],
     onMain: true,
     canDispatch: true,
+    modelPicker: true,
     dispatch: "issue",
     dispatchInputLabel: "Idea number",
     dispatchInputHelp: "The number of the idea (GitHub issue) you want rewritten.",
@@ -64,6 +66,7 @@ export const AGENTS: AgentMeta[] = [
     ],
     onMain: true,
     canDispatch: true,
+    modelPicker: true,
     dispatch: "none",
   },
   {
@@ -76,6 +79,7 @@ export const AGENTS: AgentMeta[] = [
     triggers: ["Automatically on every pull request"],
     onMain: true,
     canDispatch: false,
+    modelPicker: true,
     dispatch: "none",
   },
   {
@@ -91,6 +95,7 @@ export const AGENTS: AgentMeta[] = [
     ],
     onMain: true,
     canDispatch: true,
+    modelPicker: true,
     dispatch: "pr",
     dispatchInputLabel: "Pull request number",
     dispatchInputHelp: "The number of the pull request to capture evidence for.",
@@ -105,6 +110,7 @@ export const AGENTS: AgentMeta[] = [
     triggers: ["Automatically every Sunday evening", "Can be run on demand"],
     onMain: true,
     canDispatch: true,
+    modelPicker: true,
     dispatch: "none",
   },
   {
@@ -136,6 +142,7 @@ export const AGENTS: AgentMeta[] = [
     ],
     onMain: true,
     canDispatch: false,
+    modelPicker: true,
     dispatch: "none",
   },
   {
@@ -148,6 +155,7 @@ export const AGENTS: AgentMeta[] = [
     triggers: ["Triggered from the Tools section (a 'tool-install' event)"],
     onMain: true,
     canDispatch: false,
+    modelPicker: true,
     dispatch: "none",
   },
 ];

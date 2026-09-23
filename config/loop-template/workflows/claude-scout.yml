@@ -120,6 +120,46 @@ jobs:
           echo "use_bedrock=$([ "$provider" = "bedrock" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "region=$region" >> "$GITHUB_OUTPUT"
 
+      # ── AI model: which Claude model this agent runs on ─────────────────────────
+      # Picked on the dashboard's Process Map (the agent's Model tab) and stored in
+      # .github/loop-config.json -> "models": this agent's own key first, then "all".
+      # A pick is used only when it is on the list in .github/loop-models.json. A
+      # missing file, a missing key, or a model not on the list falls back to opus -
+      # what this agent always ran on - with a warning, never a failed run.
+      - name: Resolve AI model
+        id: model
+        env:
+          AGENT: scout
+        run: |
+          model=opus
+          source="built-in default"
+          for key in "$AGENT" all; do
+            picked=$(jq -r --arg k "$key" '.models | objects | .[$k] | strings' .github/loop-config.json 2>/dev/null || true)
+            [ -n "$picked" ] || continue
+            case "$picked" in
+              *[!A-Za-z0-9._-]*)
+                shown="(a value with unexpected characters)"
+                known=false
+                ;;
+              *)
+                shown="'$picked'"
+                known=$(jq -r --arg m "$picked" 'any(.choices[]? | objects; .id == $m)' .github/loop-models.json 2>/dev/null || echo false)
+                ;;
+            esac
+            if [ "$known" = true ]; then
+              model=$picked
+              source="models.$key in .github/loop-config.json"
+              break
+            fi
+            if [ -f .github/loop-models.json ]; then
+              echo "::warning::Ignoring models.$key $shown in .github/loop-config.json - it is not one of the models listed in .github/loop-models.json."
+            else
+              echo "::warning::Ignoring models.$key $shown in .github/loop-config.json - this repo has no .github/loop-models.json (the list of models agents may use), so no pick can be checked. Copy it from the dashboard's loop template."
+            fi
+          done
+          echo "AI model: $model ($source)"
+          echo "model=$model" >> "$GITHUB_OUTPUT"
+
       # Cheap pre-flight in plain bash so we never boot an expensive agent for nothing.
       - name: Check the proposal pool and triage health
         id: gate
@@ -479,7 +519,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           show_full_output: true
           claude_args: &scout_claude_args |
-            --model opus
+            --model ${{ steps.model.outputs.model || 'opus' }}
             --max-turns 50
             --allowedTools "Bash,BashOutput,KillShell,Read,Glob,Grep,Task,TodoWrite,WebSearch,WebFetch"
           prompt: &scout_prompt |

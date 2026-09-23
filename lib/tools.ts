@@ -19,6 +19,13 @@ import {
   listWorkflowFiles,
   type RepoConfig,
 } from "@/lib/github";
+import { getLoopConfig } from "@/lib/loop-config";
+import { AGENTS } from "@/lib/map-agents";
+import {
+  resolveAgentModel,
+  workflowReadsModelPick,
+  type AgentModels,
+} from "@/lib/loop-models";
 
 /**
  * Legacy fallback branch: if a workflow file isn't on main, we look here before
@@ -131,7 +138,21 @@ function parseAllowedTools(yaml: string): string[] {
     .filter(Boolean);
 }
 
-function parseModel(yaml: string): string | null {
+/**
+ * The model a workflow runs on. A template workflow reads it from the owner's
+ * pick (see lib/loop-models.ts), so that one is resolved from the project's
+ * loop config - `null` when the config couldn't be read, rather than a guess.
+ */
+function parseModel(
+  yaml: string,
+  file: string,
+  models: AgentModels | undefined | null,
+): string | null {
+  if (workflowReadsModelPick(yaml)) {
+    const agentId = AGENTS.find((a) => a.file === file)?.id;
+    if (!agentId || models === null) return null;
+    return resolveAgentModel(models, agentId).model;
+  }
   const m = yaml.match(/--model\s+([A-Za-z0-9._-]+)/);
   return m ? m[1] : null;
 }
@@ -162,6 +183,7 @@ async function parseAgentWorkflow(
   ref: AgentWorkflowRef,
   mcpServers: string[],
   repo: RepoConfig,
+  models: AgentModels | undefined | null,
 ): Promise<AgentCapabilities> {
   const { file, blurb } = ref;
   let name = ref.name;
@@ -210,7 +232,7 @@ async function parseAgentWorkflow(
   if (!isAgent) return base;
 
   base.found = true;
-  base.model = parseModel(yaml);
+  base.model = parseModel(yaml, file, models);
 
   const rawTools = parseAllowedTools(yaml);
   const builtin: string[] = [];
@@ -325,16 +347,22 @@ export async function loadCapabilityInventory(
   shared: SharedCapabilities;
 }> {
   // .mcp.json can live on main or only on the onboarding branch.
-  const [mcpRaw, workflowRefs] = await Promise.all([
+  const [mcpRaw, workflowRefs, models] = await Promise.all([
     getFileContent(".mcp.json", undefined, repo).then(
       (raw) => raw ?? getFileContent(".mcp.json", FALLBACK_BRANCH, repo),
     ),
     resolveAgentWorkflows(repo),
+    // Only for the model chip: an unreadable config hides the chip instead of
+    // failing the whole inventory.
+    getLoopConfig(repo).then(
+      (c) => c.models,
+      () => null,
+    ),
   ]);
   const repoMcpServers = parseMcpServers(mcpRaw);
 
   const agents = await Promise.all(
-    workflowRefs.map((w) => parseAgentWorkflow(w, repoMcpServers, repo)),
+    workflowRefs.map((w) => parseAgentWorkflow(w, repoMcpServers, repo, models)),
   );
   const shared = computeSharedCapabilities(agents, repoMcpServers);
   return { agents, repoMcpServers, shared };

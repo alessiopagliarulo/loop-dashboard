@@ -432,3 +432,30 @@ back to `updatedAt` then `createdAt`. The fallbacks are approximate in *known di
 approximation rather than implying precision it does not have.
 
 **When:** 2026-09-08.
+
+---
+
+## 15. Per-agent models: picked on the Process Map, checked against a list the repo holds
+
+**Decided:** the owner picks each loop agent's Claude model (or one for all agents) on the
+Process Map's Model tab. The pick is stored in the target repo's `.github/loop-config.json`
+under `models`, keyed by Process Map agent id plus `all`, and each agent workflow resolves it
+in a "Resolve AI model" step: its own key, then `all`, then `opus`, which is what every agent
+ran on before. The models on offer live in one file, `config/loop-template/files/loop-models.json`:
+the dashboard imports it for the picker, and onboarding installs it as `.github/loop-models.json`,
+where the workflows check a pick against it.
+
+**Why:** a workflow cannot see this repo, so it needs its own copy of the list to tell a real
+model from a typo, and a bad `--model` would fail the run. Installing the same file the
+dashboard reads keeps one list, rather than one in the UI and another spelled out in eight
+workflows. Ids are Claude Code aliases (`opus`, `sonnet`, `haiku`), which resolve on both the
+subscription and Bedrock, so `aiProvider` and `models` stay independent.
+
+**Fail-soft rule:** a missing file, a missing key, malformed JSON, or a model not on the list is
+skipped with a warning and the agent falls through to the next setting. The resolve step cannot
+exit non-zero, and the agent step also carries `|| 'opus'` in case the step never ran.
+
+**Not covered:** the Scout workflow's staleness check (`stale-check` job) keeps its own
+`--model sonnet`. It is a cheap second job, not the Scout agent the owner is picking for.
+
+**When:** 2026-09-23.
